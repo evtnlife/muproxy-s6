@@ -1,0 +1,18 @@
+[
+  {
+    "content": "Rewrite root .gitignore to track only .novamind/skills/",
+    "status": "completed"
+  },
+  {
+    "content": "git init at F:\\blackrockmu",
+    "status": "completed"
+  },
+  {
+    "content": "git add + verify only skill files are staged",
+    "status": "completed"
+  },
+  {
+    "content": "Commit the skill files",
+    "status": "completed"
+  }
+]

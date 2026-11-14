@@ -1,0 +1,2 @@
+# Track ONLY the project skill; ignore everything else at the root
+# (game binaries, reference sources, and the nested gg_bypass2/MuProxy2 repos).

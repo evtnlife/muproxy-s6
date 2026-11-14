@@ -1,0 +1,12 @@
+{
+  "rules": [
+    "MuProxy2 attach flow: byp.dll is NOT injected via CreateRemoteThread. The game (main.exe) naturally loads opengl32.dll from the game directory, and opengl32.dll's DllMain calls LoadLibraryA(\"byp.dll\") to load the bypass.",
+    "x32dbg command to open/initiate debugging a file is `init <path>`, not `fileopen`.",
+    "User communicates in Portuguese — respond in Portuguese",
+    "Project root is F:\\blackrockmu (BlackrockMU private server client)",
+    "User communicates in Portuguese",
+    "Project is a BlackrockMU private server client at F:\\blackrockmu",
+    "PS (PS.dll) no longer exists in the project — related docs can be deleted",
+    "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)"
+  ]
+}
