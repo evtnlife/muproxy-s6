@@ -2,45 +2,39 @@
 
 Human-readable, incremental record of this project session. Older entries are auto-consolidated when this file grows large.
 
-## Consolidated Summary (updated 2026-11-14T22:21:54.957Z)
+## Consolidated Summary (updated 2026-11-14T23:23:18.955Z)
 ### Mu Online Injection Project Summary
 
 **Context**
-Reverse-engineering `F:\blackrockmu\` to inject Attack packets (`C1 07 11`) via `byp.dll` side-loading.
+Reverse-engineering `F:\blackrockmu\` to inject Attack packets via `byp.dll` side-loading.
 
 **Key Changes & Decisions**
 *   **Packet Logic:** `D0/D1` use pure entity index (XOR removed); `D2` constant `0x78`.
-*   **Targeting:** Removed "spray ±1"; reliance on Watcher updating `g_MonsterMap` within `g_SessionRange`.
-*   **Skill Parser:** Fixed `entryStart` off-by-one (skip ListType byte). Filter changed to `F3 11`. Level decode: `level_encoded >> 3` (4-byte entries: `[slot] [m_index LE] [level_encoded]`).
-*   **Encryption:** Two-layer implementation:
-    1.  `wire = (plain + 0x07) ^ 0x36`
-    2.  `XorData` applied to bytes `[3, 7)`.
-*   **Logging:** Implemented `LogPacketDual` in `Logger.h/cpp`. Game Server (GS) packets now log `hex=<Crypted> dec=<Decrypted>` on a single line in `PacketSniffer.cpp`. Non-GS sockets log raw only.
+*   **Targeting:** Removed "spray ±1"; relies on Watcher updating `g_MonsterMap` within `g_SessionRange`.
+*   **Skill Parser:** Fixed `entryStart` off-by-one (skip ListType byte). Filter changed to `F3 11`. Level decoded via `level_encoded >> 3`.
+*   **Encryption:** Two-layer implementation: 1) `wire = (plain + 0x07) ^ 0x36`, 2) `XorData` applied to bytes `[3, 7)`.
+*   **Logging:** `LogPacketDual` in `Logger.h/cpp` logs GS packets as `hex=<Crypted> dec=<Decrypted>` in `PacketSniffer.cpp`.
 *   **Build:** Fixed `build.bat` silent failures (`ping -n 3` replaces `timeout`).
+*   **Verification:** Skill Force (`C1 07`) confirmed working. Client-side target index (`OFF_INDEX`) differs from server-side ID (`OFF_ID`), which is expected. Native decryption fails (`smObj` returns -1), but custom decryption works 100%.
 
 **Architecture & Files**
 *   **Injection:** `opengl32.dll` proxy loads `byp.dll`; redirects to `127.0.0.1:44412/44413`.
 *   **Capture:** `HookListenerService` outputs hex via `\\.\pipe\MuProxy2`.
 *   **Paths:**
     *   Project: `F:\blackrockmu\psdisabled\MuProxy2\MuProxy2\`
-    *   Outputs: `dist\byp.dll` (~69KB), `bin\Release\net8.0-windows\MuProxy2.exe`
-    *   Deployed DLL: `F:\blackrockmu\byp.dll`
-*   **Dependencies:** `PS.dll` stub (`wzAudioPlay`), `McpXdbg32.dp32` at `F:\PluginXdbg32\build32\Release\`.
+    *   Outputs: `dist\byp.dll`, `bin\Release\net8.0-windows\MuProxy2.exe`
+    *   Deployed: `F:\blackrockmu\byp.dll`
+*   **Dependencies:** `PS.dll` stub, `McpXdbg32.dp32` at `F:\PluginXdbg32\build32\Release\`.
 
 **Current State**
 *   **Build:** Successful; new `byp.dll` deployed.
 *   **Debugging:** Conditional breakpoint armed at `0x6E7D3490` (cipher function).
-*   **Task:** Trigger in-game attack to pause execution. Read plaintext from `[esp+8]` (`src+2`) and size from `[esp+12]` to verify decryption.
+*   **Task:** Trigger in-game attack to verify decryption by reading plaintext from `[esp+8]` and size from `[esp+12]`.
 
 **Open Blockers & Next Steps**
 *   **DLL Load Error:** `byp.dll` fails with `0xC0000135` (STATUS_DLL_NOT_FOUND). Suspect missing `msvcr100.dll` or corruption.
-*   **Node Version:** REA Agent requires Node ≥24.22.1 (system has 24.18.1). Temp instance: `C:\Users\BRINCA~1\AppData\Local\Temp\node2422`.
-*   **Action:** Execute in-game attack to capture call stack and verify specific attack packet decryption via the armed breakpoint.
-
-## 2026-11-14T13:59:50.774Z
-- **User:** logs de uso da skill force. [2026-11-14 05:11:50] [PACKETSNIFFER] SEND C1 8 bytes [C1 08 F3 FC E5 C6 03 A0 ] [2026-11-14 05:11:50] [PACKETSNIFFER] SEND stack: Main.dll+0xBB3DE main.exe+0x5153 Main.dll+0x1464BC Main.dll+0x74D36 KERNEL32.DLL+0x1FCC9 ntdll.dll+0x682AE ntdll.dll+0x6827E [2026-11-14 05:11:50] [PACKETSNIFFER] CONNECT to 145.239.149.84:44411 [2026-11-14 05:11:50] [PACKETSNIFFER] recv() ret=4 socket=1696 [2026-11-14 05:11:50] [PACKETSNIFFER] recv() ret=41 socket=1696 [2026-11-14 05:11:5…
-- **Outcome:** O alvo da skill é `0x310F` (`OFF_INDEX`), enquanto o monstro que o servidor reporta nos `RECV` é `0x02E8` (`OFF_ID`). São **dois campos diferentes do mesmo objeto** (índice client-side vs. ID server-side) — por isso os valores divergem. Se o monstro `0x02E8` está morrendo a cada cast, a skill está acertando o alvo certo. ## Resumo Tudo certo com a skill Force: - **Pacote correto** (`C1 07 19 E7 C3 E2 CF`), alvo e direção coerentes. - **Criptografia SM validada** (fórmula, checksum, `dk` contínuo). - **Monstros morrem** — o ataque está efetivo. - O flood `C1 06` é do jogo, não do DLL. Única limitação conhecida: o **native decrypt sempre falha** e o DLL depende do own decrypt (que funciona 100%). Se quiser, posso investigar *por que* o `smObj` nativo retorna `-1` para o C3 de skill — mas para o uso da skill Force, nada está quebrado.
-- **Tools:** list_directory, read_file, search_files, glob
+*   **Node Version:** REA Agent requires Node ≥24.22.1 (system has 24.18.1). Temp instance at `C:\Users\BRINCA~1\AppData\Local\Temp\node2422`.
+*   **Action:** Execute in-game attack to capture call stack and verify specific attack packet decryption.
 
 ## 2026-11-14T15:40:33.668Z
 - **User:** esse [e o pacote enviado usando a UI do jogo [2026-11-14 05:17:22] [SMOD] NativeDecrypt: smObj=0x08797778, dest=0x00197598, source=0x0019639A, size=11 [2026-11-14 05:17:22] [PACKETSNIFFER] SEND C3 decrypt (native): FAILED (decLen=-1), trying own decrypt [2026-11-14 05:17:22] [SMOD] DecryptBlock #67: src=[1B CC 5A 4E 91 13 23 4D AC A5 9E] [2026-11-14 05:17:22] [SMOD] ring=[0001CC1B 00013A69 00003211 00006BD3] finale=[A5 9E] [2026-11-14 05:17:22] [SMOD] checksum calc=0x9E expected=0x9E numBytes=6 …
