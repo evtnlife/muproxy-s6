@@ -19,18 +19,18 @@ Consult those for packet layouts/opcodes instead of re-deriving from local notes
 ## Key files
 | File | Purpose |
 |------|---------|
-| `psdisabled/gg_bypass2/src/PacketSniffer.cpp` | Layer-1 + XorData crypto, `g_XorFilter`, HookSend, `InjectC1Attack`/`InjectToServer`, `EnqueueSkillPacket`, PKT channel |
-| `psdisabled/gg_bypass2/src/AttackModule.cpp` | `BuildAttackPacket`, `ComputeDirection`, `ComputeSkillDirection`, `SendAttack`, `SendSkillAttack`, Watcher/Dispatcher threads |
-| `psdisabled/gg_bypass2/src/SimpleModulusCipher.cpp` | C3 cipher (SM object layout, Encrypt/Decrypt, NativeEncrypt/Decrypt) |
-| `psdisabled/gg_bypass2/src/SkillMap.cpp` | skill-list parser (F3 11 variant 075: 3-byte entries, BigEndian) |
-| `psdisabled/gg_bypass2/src/GameMemory.cpp` + `include/GameAddresses.h` + `include/GameObject.h` | object array access + offsets + globals |
-| `psdisabled/gg_bypass2/src/include/MuOpcodes.h` | opcodes (0x11 attack, 0x19/0xE5 skill, C1-C4 headers) |
-| `psdisabled/gg_bypass2/src/include/Config.h` | feature flags + tunables |
-| `psdisabled/gg_bypass2/src/PsBypass.cpp` + `PsPacketHook.cpp` + `MainPatcher.cpp` + `StartupHook.cpp` | PS.dll neutralization + Main.dll patches |
-| `psdisabled/MuProxy2/MuProxy2/Protocol/Messages.cs` | C# message defs |
-| `psdisabled/MuProxy2/MuProxy2/DllCommandService.cs` | 44412 routing |
-| `psdisabled/MuProxy2/MuProxy2/TcpLoopbackProxy.cs` | blind relay |
-| `psdisabled/docs/attack_packet_re.md` | validated attack RE (source of truth) |
+| `byp/gg_bypass2/src/PacketSniffer.cpp` | Layer-1 + XorData crypto, `g_XorFilter`, HookSend, `InjectC1Attack`/`InjectToServer`, `EnqueueSkillPacket`, PKT channel |
+| `byp/gg_bypass2/src/AttackModule.cpp` | `BuildAttackPacket`, `ComputeDirection`, `ComputeSkillDirection`, `SendAttack`, `SendSkillAttack`, Watcher/Dispatcher threads |
+| `byp/gg_bypass2/src/SimpleModulusCipher.cpp` | C3 cipher (SM object layout, Encrypt/Decrypt, NativeEncrypt/Decrypt) |
+| `byp/gg_bypass2/src/SkillMap.cpp` | skill-list parser (F3 11 variant 075: 3-byte entries, BigEndian) |
+| `byp/gg_bypass2/src/GameMemory.cpp` + `include/GameAddresses.h` + `include/GameObject.h` | object array access + offsets + globals |
+| `byp/gg_bypass2/src/include/MuOpcodes.h` | opcodes (0x11 attack, 0x19/0xE5 skill, C1-C4 headers) |
+| `byp/gg_bypass2/src/include/Config.h` | feature flags + tunables |
+| `byp/gg_bypass2/src/PsBypass.cpp` + `PsPacketHook.cpp` + `MainPatcher.cpp` + `StartupHook.cpp` | PS.dll neutralization + Main.dll patches |
+| `byp/MuProxy2/MuProxy2/Protocol/Messages.cs` | C# message defs |
+| `byp/MuProxy2/MuProxy2/DllCommandService.cs` | 44412 routing |
+| `byp/MuProxy2/MuProxy2/TcpLoopbackProxy.cs` | blind relay |
+| `byp/docs/attack_packet_re.md` | validated attack RE (source of truth) |
 
 ## Open questions
 - Exact location of Layer-1 in the socket layer (behind `[0xD227F8]`).
