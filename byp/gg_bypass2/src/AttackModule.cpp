@@ -46,7 +46,7 @@ static AttackConfig g_Config = {
     100,    // defaultDelayMs
     0.0f,   // defaultRange (0 = sem limite)
     0,      // defaultType (0 = normal)
-    0xE7, // defaultSkillId (hardcoded: skill 0xE7)
+    0x003C, // defaultSkillId (60 = SKILL_FORCE do DL — número real da skill)
     1       // defaultHitCount
 };
 
@@ -118,52 +118,6 @@ static uint8_t ComputeDirection(uint16_t targetEntityIndex) {
     return dirByte;
 }
 
-// ---- Calcula byte de direção para skill attack (formato 0-255) ----
-// O jogo usa fórmula diferente para skill attacks:
-//   direction = ROUND(angle_degrees / 360.0 * 256.0) & 0xFF
-// Onde angle_degrees é calculado por atan2(dy, dx) convertido para graus.
-// Resultado: 0-255 (sem o offset 0xC0 dos ataques normais)
-// Evidência: pacote real C1 07 19 E7 EE CF 12 → direction = 0x12 (18 decimal)
-static uint8_t ComputeSkillDirection(uint16_t targetEntityIndex) {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
-    if (!localPlayer) return 0;
-
-    uintptr_t targetObj = GameMemory::FindObjectByEntityIndex(targetEntityIndex);
-    if (!targetObj) return 0;
-
-    float playerX = *(float*)(localPlayer + GameObject::OFF_X);
-    float playerY = *(float*)(localPlayer + GameObject::OFF_Y);
-    float targetX = *(float*)(targetObj + GameObject::OFF_X);
-    float targetY = *(float*)(targetObj + GameObject::OFF_Y);
-
-    if (playerX == 0.0f && playerY == 0.0f) return 0;
-    if (targetX == 0.0f && targetY == 0.0f) return 0;
-
-    float dx = targetX - playerX;
-    float dy = targetY - playerY;
-    if (dx == 0.0f && dy == 0.0f) return 0;
-
-    // Fórmula do jogo para skill attacks:
-    // angle = atan2(dy, dx) em radianos → converter para graus
-    // direction = ROUND(angle_deg / 360.0 * 256.0) & 0xFF
-    // O jogo adiciona +180 antes de /360 se necessário (direction_byte_1)
-    // Mas o byte que vai no pacote é direction_byte_2 (sem +180)
-    float angleRad = atan2f(dy, dx);
-    float angleDeg = angleRad * 180.0f / 3.14159265f;
-    if (angleDeg < 0) angleDeg += 360.0f;
-
-    // direction_byte_2 = (angle / 360.0 * 256.0) rounded, masked to byte
-    float dirFloat = angleDeg / 360.0f * 256.0f;
-    int dirInt = (int)(dirFloat + 0.5f);  // round
-    if (dirInt < 0) dirInt += 256;
-    uint8_t dirByte = (uint8_t)(dirInt & 0xFF);
-
-    Logger::Log("ATTACK", "ComputeSkillDir: entity=0x%04X p(%.0f,%.0f) t(%.0f,%.0f) dx=%.0f dy=%.0f angleDeg=%.1f dirInt=%d dirByte=0x%02X",
-                targetEntityIndex, playerX, playerY, targetX, targetY, dx, dy, angleDeg, dirInt, dirByte);
-
-    return dirByte;
-}
-
 // ---- Monta pacote de ataque normal 0x11 (PLAINTEXT REAL, pré-criptografia) ----
 // Formato VALIDADO (RE 2 camadas, 24 capturas nativas do byp_packets.log):
 //   C1 07 11 <targetHi> <targetLo> 78 <dir 0..7>
@@ -171,7 +125,7 @@ static uint8_t ComputeSkillDirection(uint16_t targetEntityIndex) {
 //     VALIDADO em campo: o builder nativo coloca o índice cru em D0D1
 //     (monstro 0x001A -> D0D1 = 00 1A em TODAS as capturas; D2=0x78 e
 //     D3 em 0..7 nos 4 alvos diferentes 0x001A/0x001B/0x0025/0x005A).
-//     O XOR 0xEFF5 é convenção de OUTROS opcodes (skill 0x19), não do 0x11.
+//     O skill 0x19 também usa índice puro (decodificação da captura: index=0x0277).
 //   - D2 = 0x78 CONSTANTE (disasm builder 0x5A1701: push 0x78; 0x78 em todas as 24 capturas)
 //   - D3 = direção 0..7 (disasm: [ebp-0x14] & 0x80000007)
 // Este buffer é o PLAINTEXT REAL. A criptografia (XorData [3,7) + Layer-1)
@@ -194,24 +148,23 @@ static int BuildAttackPacket(uint8_t* outBuf, uint16_t entityIndex) {
 // Forward declaration
 static bool SendPlainPacket(const uint8_t* packet, int len);
 
-// ---- Skill Attack: enfileira plaintext para HookSend processar na thread do jogo ----
-// MANUAL PATH: Forma C1 plaintext → SM encrypt → C3 → Layer-1 → send
+// ---- Skill Attack: monta o plaintext e injeta via InjectSkillC1 ----
+// (XorData → SM → C3 0D → Layer-1 → wire; direto, sem fila)
 //
-// FORMATO CORRETO (confirmado via trace x64dbg — 4 addData calls):
-//   C1 07 19 [skillH] [skillL] [targetH] [targetL]
-//   - skill: 2 bytes (skill number completo, ex: 0x01E7 = Inferno)
-//   - target: 2 bytes, XOR'd with 0xEFF5 (AttackTargetID)
-//     The game reads this from global 0x081C03A4, but the value stored there
-//     is already entityIndex XOR 0xEFF5.
-//   - SEM direction byte (o jogo não envia)
+// FORMATO CORRETO (decodificado da captura real do cliente S6, 2026-11-15):
+//   C1 07 19 [skillH] [skillL] [indexH] [indexL]
+//   - skill: 2 bytes = número da skill (ex: 0x003C = 60 = Force do DL)
+//   - index: 2 bytes = entity index PURO do monstro (SEM XOR 0xEFF5!)
+//   - SEM direction byte (o cliente envia 7 bytes, 1 a menos que a struct do
+//     servidor — o CGSkillAttackRecv só lê skill e index, nunca o dis)
 //
-// Evidência: pacote real do jogo: C1 07 19 E7 C3 E2 CF
-//   skillH=0xE7, skillL=0xC3 → skill=0xE7C3
-//   targetH=0xE2, targetL=0xCF → target=0xE2CF, 0xE2CF ^ 0xEFF5 = 0x0D3A (entity index)
+// Evidência: captura C1 07 19 E7 C3 E2 50 decodificada com o XOR encadeado
+// (PacketManager::XorData, m_XorFilter) dá C1 07 19 00 3C 02 77:
+//   skill = 0x003C = 60 (SKILL_FORCE), index = 0x0277 = 631 (monstro).
 //
-// O valor mostrado na coluna "Atk ID" do MuProxy2 é entityIndex ^ 0xEFF5.
-// Exemplo: monstro visto como EBEB na UI → entityIndex = 0xEBEB ^ 0xEFF5 = 0x0218.
-// Portanto o pacote deve enviar 0xEBEB como target (XOR'd), NÃO 0x0218.
+// DIFERENTE do ataque normal 0x11 (que vai C1 puro): o skill passa por
+// XorData encadeado no payload → SimpleModulus → C3 0D [11] → Layer-1 → wire.
+// (InjectSkillC1 no PacketSniffer faz o pipeline completo.)
 bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     uintptr_t localPlayer = GameMemory::GetLocalPlayer();
     uintptr_t targetObj = GameMemory::FindObjectByEntityIndex(entityIndex);
@@ -230,48 +183,28 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     Logger::Log("ATTACK", "SkillAttack: entityIndex=0x%04X compositeIdx(OFF_INDEX)=0x%04X objId(OFF_ID)=0x%04X slotIndex=%d skill=0x%04X",
                 entityIndex, compositeIdx, objId, slotIndex, skillId);
 
-    // Target encoding for skill attacks:
-    // - Manual skill packet format: C1 07 19 [skill(1)] [targetH] [targetL] [dir(1)]
-    // - The game reads global 0x081C03A4 directly into the packet bytes.
-    // - The value stored at 0x081C03A4 is entityIndex XOR 0xEFF5.
-    // - Confirmed: MuProxy2 UI shows AttackId = entityIndex ^ 0xEFF5 (e.g. 0xEBEB for entity 0x0218).
-    // - Therefore we MUST send entityIndex XOR 0xEFF5 as target.
-    uint16_t attackIdDirect = entityIndex;
-    uint16_t attackIdXor = GameMemory::EntityToAttackId(entityIndex); // entityIndex ^ 0xEFF5
-
-    // Use XOR'd version — matches the value the game stores at 0x081C03A4
-    uint16_t attackId = attackIdXor;
-    uint8_t direction = ComputeSkillDirection(entityIndex);
-
-    uint16_t gameTargetGlobal = GameMemory::GetTargetGlobal();
-    int32_t gameTargetSlot = GameMemory::GetTargetSlotGlobal();
-
-    // Log ALL target encodings for diagnostic comparison
-    Logger::Log("ATTACK", "SkillAttack: entity=0x%04X DIRECT=0x%04X XOR=0x%04X gameGlobal=0x%04X gameSlot=%d dir=0x%02X skill=0x%04X",
-                entityIndex, attackIdDirect, attackIdXor, gameTargetGlobal, gameTargetSlot, direction, skillId);
-
-    // Server format (GAMESERVER_UPDATE>=701, SkillManager.h PMSG_SKILL_ATTACK_RECV):
-    //   C1 07 19 [indexH] [skillH] [indexL] [skillL]
-    // Bytes INTERCALADOS: index e skill alternam H/L.
-    // Servidor lê: bIndex = MAKE_NUMBERW(indexH,indexL), skill = MAKE_NUMBERW(skillH,skillL)
-    uint8_t smInput[7];
-    smInput[0] = 0xC1;                                          // header C1
-    smInput[1] = 0x07;                                          // size = 7 bytes total
-    smInput[2] = MuOpcodes::TARGETED_SKILL;                     // opcode 0x19
-    smInput[3] = (uint8_t)((attackId >> 8) & 0xFF);            // indexH
-    smInput[4] = (uint8_t)((skillId >> 8) & 0xFF);             // skillH
-    smInput[5] = (uint8_t)(attackId & 0xFF);                    // indexL
-    smInput[6] = (uint8_t)(skillId & 0xFF);                     // skillL
+    // Plaintext real: [C1][07][19][skillH][skillL][indexH][indexL]
+    // skill primeiro, depois o entity index PURO (sem 0xEFF5 — o XOR é só do 0x11).
+    // Servidor lê: skill = MAKE_NUMBERW(skillH,skillL), bIndex = MAKE_NUMBERW(indexH,indexL).
+    uint8_t plain[7];
+    plain[0] = MuOpcodes::HEADER_C1;               // 0xC1
+    plain[1] = 0x07;                               // size = 7 bytes total
+    plain[2] = MuOpcodes::TARGETED_SKILL;          // opcode 0x19
+    plain[3] = (uint8_t)((skillId >> 8) & 0xFF);   // skillH
+    plain[4] = (uint8_t)(skillId & 0xFF);          // skillL
+    plain[5] = (uint8_t)((entityIndex >> 8) & 0xFF); // indexH (entity index puro)
+    plain[6] = (uint8_t)(entityIndex & 0xFF);      // indexL
 
     char hex[32];
     int h = 0;
     for (int i = 0; i < 7; i++)
-        h += snprintf(hex + h, sizeof(hex) - h, "%02X ", smInput[i]);
+        h += snprintf(hex + h, sizeof(hex) - h, "%02X ", plain[i]);
 
-    Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> enqueue MANUAL", hex);
+    Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> InjectSkillC1", hex);
 
-    // Enfileira com tipo MANUAL: forma C1 payload → SM encrypt → C3 → Layer-1 → send
-    return PacketSniffer::EnqueueSkillPacket(smInput, 7, PacketSniffer::SKILL_TYPE_MANUAL, skillId, attackId);
+    // Pipeline do skill (diferente do 0x11):
+    //   XorData[3,7) → SM → C3 0D [11] → Layer-1 → wire
+    return PacketSniffer::InjectSkillC1(plain, 7);
 }
 static bool SendPlainPacket(const uint8_t* packet, int len) {
     // Injeta DIRETO no socket do game server (sem round-trip via MuProxy2).

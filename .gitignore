@@ -26,3 +26,4 @@ MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.secondary.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.write.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/MuProxy2.Hook.lastbuildstate
 .novamind/
+node_modules/*

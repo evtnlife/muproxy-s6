@@ -1,26 +1,22 @@
 [
   {
-    "content": "Etapa 1: 00_overview.md + 01_builder_0x59C260.md",
+    "content": "Criar proposal.md",
     "status": "completed"
   },
   {
-    "content": "Etapa 2: 02_packet_obj_methods.md (Reset/Clear/InsertAt/AddByte)",
+    "content": "specs/ — skip_specs (refactor pura)",
     "status": "completed"
   },
   {
-    "content": "Etapa 3: 03_send_encrypt_0x404DB0.md (serial + SM + C3/C4)",
+    "content": "Criar design.md",
     "status": "completed"
   },
   {
-    "content": "Etapa 4: 04_thunk_0x59B3C0.md (caller → Main.dll)",
+    "content": "Criar tasks.md",
     "status": "completed"
   },
   {
-    "content": "PRÓXIMA: breakpoint live em 0x59C725 + 0x404E34 para capturar skill/target reais",
-    "status": "pending"
-  },
-  {
-    "content": "PRÓXIMA: frames superiores (0x1B554F, 0x1B7745, 0xD957C...) e Main.dll+0x1484F1",
-    "status": "pending"
+    "content": "Mostrar status final",
+    "status": "completed"
   }
 ]

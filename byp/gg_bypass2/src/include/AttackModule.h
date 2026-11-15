@@ -56,8 +56,9 @@ void Shutdown();
 bool SendAttack(uint16_t entityIndex);
 
 // Envia pacote de ataque com skill (opcode 0x19, TARGETED_SKILL)
-// entityIndex é o OFF_INDEX (0x07E); XOR com 0xEFF5 é feito internamente
-// para obter o AttackTargetID que vai no pacote, igual ao ataque normal.
+// Formato: C1 07 19 [skillH][skillL][indexH][indexL] — skill primeiro,
+// entityIndex PURO (sem 0xEFF5). Pipeline: XorData -> SM -> C3 0D -> Layer-1
+// (diferente do ataque normal 0x11, que vai C1 puro).
 bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId);
 
 // Envia ataque considerando tipo, skill, range e delay configurados

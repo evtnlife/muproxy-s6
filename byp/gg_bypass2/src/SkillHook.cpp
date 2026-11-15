@@ -61,6 +61,22 @@ static void __cdecl LogEncryptSend(uintptr_t ecx_val, uintptr_t arg1, uintptr_t 
                 "0x404D70: ecx=%p arg1=%d arg2=%d size=%d data=[%s]",
                 (void*)ecx_val, (int)arg1, (int)arg2, size, hex);
 
+    // Log skill wire ID table globals (validate transformation hypothesis)
+    __try {
+        BYTE  flag  = *(BYTE*)(uintptr_t)GameAddresses::SKILL_TABLE_FLAG;
+        DWORD index = *(DWORD*)(uintptr_t)GameAddresses::SKILL_TABLE_INDEX;
+        DWORD tbase = *(DWORD*)(uintptr_t)GameAddresses::SKILL_TABLE_BASE;
+        WORD  wireId = 0;
+        if (flag && tbase > 0x10000) {
+            wireId = *(WORD*)(tbase + (DWORD)index * 2 + 0x78);
+        }
+        Logger::Log("SKILLHOOK",
+                    "  TABLE: flag=%d index=0x%04X base=0x%08X wireId=0x%04X",
+                    (int)flag, (unsigned)index, (unsigned)tbase, (unsigned)wireId);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        Logger::Log("SKILLHOOK", "  TABLE: (access violation reading globals)");
+    }
+
     InterlockedExchange(&g_HookReentrant, 0);
 }
 

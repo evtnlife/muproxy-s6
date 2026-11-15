@@ -82,8 +82,18 @@ struct GameAddresses {
     // __thiscall: ECX = SimpleModulus object pointer
     // Stack args: (void* dest, const void* source, int size)
     // Returns: int (decrypted size)
-    // RVA: 0x598490, Absolute: 0x00998490 (confirmed via x64dbg: call 0x998620 per block)
+    // RVA: 0x598490, Absolute: 0x00998490 (confirmed via x32dbg: call 0x998620 per block)
     static constexpr uintptr_t SIMPLEMODULUS_DECRYPT = 0x598490;
+
+    // Skill wire ID table (builder 0x59C260, prologue)
+    // byte [SKILL_TABLE_FLAG] != 0 → table active, use lookup
+    // dword [SKILL_TABLE_INDEX] = raw skill index (e.g. 0x3C for Force)
+    // dword [SKILL_TABLE_BASE] = base pointer of the wire ID table
+    // word [SKILL_TABLE_BASE + index*2 + 0x78] = wire skill ID (16-bit)
+    // Absolute addresses (NOT RVAs).
+    static constexpr uintptr_t SKILL_TABLE_FLAG  = 0x081C0398;
+    static constexpr uintptr_t SKILL_TABLE_INDEX = 0x081C039C;
+    static constexpr uintptr_t SKILL_TABLE_BASE  = 0x08128AC8;
 
 
 };

@@ -1667,15 +1667,16 @@ bool InjectToServer(const uint8_t* data, int len) {
 }
 
 // ============================================================================
-// InjectC1Attack — Injeta o PLAINTEXT REAL de um ataque C1 0x11.
-// Aplica as DUAS camadas na ordem correta (VALIDADO, RE 4 capturas):
+// InjectC1Attack — Injeta o PLAINTEXT REAL de um ataque C1 (0x11 normal /
+// 0x19 skill). Aplica as DUAS camadas na ordem correta (VALIDADO, RE):
 //   plaintext -> XorData[3,len) (Camada 2) -> Layer-1 (Camada 1) -> wire
-// Ex.: C1 07 11 00 1A 78 04 -> C1 07 11 EF ED B6 77 -> FE 38 2E C0 C2 8B 48
+// Ex. 0x11: C1 07 11 00 1A 78 04 -> C1 07 11 EF ED B6 77 -> FE 38 2E C0 C2 8B 48
+// Ex. 0x19: C1 07 19 00 3C 02 77 -> (XorData) C1 07 19 E7 C3 E2 50 -> (Layer-1) wire
 // Diferente de InjectToServer (que ja recebe a forma XorData e faz so Layer-1).
 // ============================================================================
 bool InjectC1Attack(const uint8_t* plaintext, int len) {
     if (!plaintext || len < 7) return false;
-    if (plaintext[0] != 0xC1 || plaintext[2] != 0x11) return false;
+    if (plaintext[0] != 0xC1 || (plaintext[2] != 0x11 && plaintext[2] != 0x19)) return false;
 
     uint8_t buf[4096];
     if (len > (int)sizeof(buf)) return false;
@@ -1687,6 +1688,76 @@ bool InjectC1Attack(const uint8_t* plaintext, int len) {
 
     // Camada 1 (Layer-1) + send (delega para InjectToServer)
     return InjectToServer(buf, len);
+}
+
+// ============================================================================
+// InjectSkillC1 — Injeta o PLAINTEXT REAL de um skill attack C1 0x19.
+// Pipeline (diferente do 0x11, que vai C1 puro):
+//   1. XorData[3,7)  — XOR encadeado no payload (key m_XorFilter, anchor 0x19)
+//   2. SM input      — [serial 0x08793700] + payload XorData'd [19 sH sL iH iL]
+//   3. SimpleModulus — 6 bytes → 11 bytes (1 bloco)
+//   4. C3 0D [11]    — header C3 + size
+//   5. Layer-1 + send
+// O serial (MAIN_PACKET_SERIAL) é lido e incrementado — o próximo C3 do jogo
+// continua na sequência.
+// ============================================================================
+bool InjectSkillC1(const uint8_t* plaintext, int len) {
+    if (!plaintext || len != 7) return false;
+    if (plaintext[0] != 0xC1 || plaintext[2] != 0x19) return false;
+
+    // 1. XorData encadeado no payload [3,7) (anchor = byte 2 = 0x19)
+    uint8_t buf[7];
+    memcpy(buf, plaintext, 7);
+    GameServerXorData((char*)buf, 3, 7);
+
+    char xorHex[32];
+    int xh = 0;
+    for (int i = 0; i < 7; i++)
+        xh += snprintf(xorHex + xh, sizeof(xorHex) - xh, "%02X ", buf[i]);
+    Logger::Log("PACKETSNIFFER", "InjectSkillC1: after XorData [%s]", xorHex);
+
+    // 2. SM input = [serial] + payload XorData'd (5 bytes: 19 sH sL iH iL)
+    uint8_t* pSerial = (uint8_t*)0x08793700;            // MAIN_PACKET_SERIAL (abs)
+    uint8_t smInput[6];
+    smInput[0] = *pSerial;
+    memcpy(smInput + 1, buf + 2, 5);
+    (*pSerial)++;
+
+    char smInHex[48];
+    int ih = 0;
+    for (int i = 0; i < 6; i++)
+        ih += snprintf(smInHex + ih, sizeof(smInHex) - ih, "%02X ", smInput[i]);
+    Logger::Log("PACKETSNIFFER", "InjectSkillC1: SM input [%s] (serial consumido)", smInHex);
+
+    // 3. SimpleModulus: 6 bytes → 11 bytes
+    uint8_t smOutput[64];
+    int smLen = SimpleModulusCipher::Encrypt(smOutput, smInput, 6);
+    if (smLen <= 0) {
+        Logger::Log("PACKETSNIFFER", "InjectSkillC1: SM encrypt failed (smLen=%d)", smLen);
+        return false;
+    }
+
+    char smHex[128];
+    int sh = 0;
+    for (int i = 0; i < smLen && sh + 3 < (int)sizeof(smHex); i++)
+        sh += snprintf(smHex + sh, sizeof(smHex) - sh, "%02X ", smOutput[i]);
+    Logger::Log("PACKETSNIFFER", "InjectSkillC1: SM encrypted [%s] len=%d", smHex, smLen);
+
+    // 4. C3 0D [11 bytes]
+    uint8_t c3Buf[2 + 64];
+    c3Buf[0] = 0xC3;
+    c3Buf[1] = (uint8_t)(2 + smLen);
+    memcpy(c3Buf + 2, smOutput, smLen);
+
+    // 5. Layer-1 + send
+    if (!InjectToServer(c3Buf, 2 + smLen)) {
+        Logger::Log("PACKETSNIFFER", "InjectSkillC1: InjectToServer failed");
+        return false;
+    }
+
+    Logger::Log("PACKETSNIFFER", "InjectSkillC1: sent C3 0D (%d bytes) skill=0x%04X index=0x%04X",
+                2 + smLen, (plaintext[3] << 8) | plaintext[4], (plaintext[5] << 8) | plaintext[6]);
+    return true;
 }
 
 } // namespace PacketSniffer

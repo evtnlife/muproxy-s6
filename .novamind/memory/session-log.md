@@ -1,58 +1,62 @@
 
 
-## Consolidated Summary (updated 2026-11-15T19:13:57.149Z)
-*   **Objective:** Optimize `gg_bypass2` logging by consolidating output to `gg_bypass2.log` and standardizing decryption to the non-native method.
-*   **Log Consolidation:**
-    *   Removed `byp_packets.log` and `PACKET_LOG_FILENAME` from `src/include/Config.h`.
-    *   Updated `src/include/Logger.h` and `src/Logger.cpp`: Deleted `g_PacketLogFile`; `Initialize` now accepts a single path. All logs write exclusively to `g_LogFile`.
-*   **Decryption Standardization:**
-    *   **`src/PacketSniffer.cpp`:** Removed `NativeDecrypt` call and fallback logic in `HookSend`. Now directly calls `SimpleModulusCipher::Decrypt` (non-native/own algorithm). This eliminates "native failed" noise and relies on C++ reimplementation (modular inverse of `EncKey`) which handles C2S decryption correctly (unlike native which fails due to zeroed `DecKey`).
-    *   **`src/SimpleModulusCipher.cpp/.h`:** Removed `NativeDecrypt` implementation and declaration. Kept `NativeEncrypt` for self-tests.
-*   **Diagnostic Restoration (`src/PacketSniffer.cpp`):**
-    *   Reverted file to Git HEAD to reinstate `LogStackTrace` (EBP walk) in `HookSend`/`HookWSASend`.
-    *   Restored human-readable C3/C4 decoding (`SEND C3 decoded: ... dk=...`) and step-by-step `ProcessSkillQueue` logs.
-    *   Re-enabled verbose noise: `recv()` return values, `WSASend` byte counts/hex dumps, and SM debug blocks.
-    *   **Format Standard:** `LogPacket` outputs `hex=<raw>`; `LogPacketDual` outputs `hex=<raw> dec=<decrypted>` (raw first).
-*   **Attack Module (`src/AttackModule.cpp`):**
-    *   Reduced logging for normal attacks (removed `ComputeDir`, per-hit hex dumps, 800ms status logs).
-    *   Retained full logging for skill attacks (direction, entity/XOR details), lifecycle events, and on-demand diagnostics (DUMP, HEXDUMP).
-*   **Injection Logging:**
-    *   Added `LogPacketDual("PACKETSNIFFER", "SEND", ...)` in `InjectToServer` (~line 1410) to capture injected packets bypassing `HookSend`.
-*   **Recent Adjustment:**
-    *   Removed `Logger::LogPacketDual`/`LogPacket` calls from `LogRaw` to reduce hex wall noise, keeping reassembly/proxy logic intact.
-*   **Current State:**
-    *   Build via `build.bat` successful; `byp.dll` deployed to `F:\blackrockmu\`.
-    *   Zero build errors.
-    *   System logs to single `gg_bypass2.log` with restored stack traces and human-readable packet details; low noise for non-skill traffic.
-*   **Open Threads:**
-    *   Investigate condensation of `[SMOD] DecryptBlock #N` logs (currently ~150 lines per 94-byte packet due to repeated Mod/Dec/Xor details per 8-byte block).
+## Consolidated Summary (updated 2026-11-15T21:47:02.627Z)
+## Session Summary: `gg_bypass2` Optimization & Skill Protocol Debugging (2026-11-15)
 
-## 2026-11-15T03:23:22.867Z
-- **User:** agora que vc ja atualizou os logs. quero que vc atualize a skill que temos para ela saber analisar os logs da forma correta durante as sessoes de debug, sem ficar perdida...
-- **Outcome:** Skill atualizada. Resumo do que foi feito: ## Nova referência: `references/11-log-analysis.md` Tudo verificado contra o código-fonte atual (Logger.cpp, PacketSniffer.cpp, SimpleModulusCipher.cpp, AttackModule.cpp): - **Onde o log mora** — arquivo único `F:\blackrockmu\gg_bypass2.log`, append + `_SH_DENYNO`; MuProxy2 escreve em `logs/` (subpasta, sem conflito); formato `[data hora] [TAG] msg` - **O que NÃO está no log (de propósito)** — sem hex dump do `LogRaw`, sem linhas `NativeDecrypt`, ataques normais (0x11) não logam nada - **Exemplo de um SEND C3 saudável** — o fluxo completo: `SEND C3 N bytes` → `SEND stack:` → `SM input bytes` → `DecryptBlock #N` → `ring/finale` → `checksum calc/expected` → `SEND C3 decrypt: OK` → `SEND C3>C1 decoded: [...] dk=..` - **SMOD por bloco** — o que é sempre logado vs. verbose (só primeiros 10 blocos) vs. em caso de falha (comparação Live vs. Cached keys) - **Bloco de init SMOD** — como ler o dump de 72 bytes, `Verify mod inverse` (OK/FAIL), `Roundtrip` (MATCH/MISMATCH) e `NativeEncrypt->ourDecrypt` - **Tag ATTACK** — linhas de skill attack, lifecycle, e diagnósticos on-demand - **Tabela de debug recipes** — sintoma → causa → próximo passo (8 linhas) ## Correções em referências existentes - **`SKILL.md`** — linha 11 na tabela + quick fact apontando pro §11 - **`03-crypto.md`** — `NativeDecrypt` marcado como removido; own `Decrypt` é o caminho único de C3/C4 - **`07-build-deploy.md`** — log único, `byp_packets.log` removido - **`08-config.md`*…
-- **Tools:** skill, search_files, read_file, manage_todos, write_file, edit_file, todo
+*   **Core Changes**
+    *   **Logging:** Consolidated all output to `gg_bypass2.log`; removed `byp_packets.log` and per-hit hex dumps. Reduced log noise for normal attacks (`0x11`).
+    *   **Crypto:** Standardized C2S decryption to `SimpleModulusCipher::Decrypt`; removed `NativeDecrypt` fallback.
+    *   **Code Refactoring:**
+        *   `src/Logger.cpp/.h`, `src/include/Config.h`: `Initialize` now accepts a single log path.
+        *   `src/PacketSniffer.cpp`: Removed `NativeDecrypt`, restored `LogStackTrace`, added `LogPacketDual` in `InjectToServer`.
+        *   `src/SimpleModulusCipher.cpp/.h`: Removed `NativeDecrypt`; retained `NativeEncrypt` for self-tests.
+    *   **Documentation:** Created `references/11-log-analysis.md` and `byp/docs/stack_c1_07_19/`. Updated `SKILL.md`, `03-crypto.md`, `07-build-deploy.md`, and `08-config.md`.
 
-## 2026-11-15T17:48:26.437Z
-- **User:** vc analisou analisou e analisou e nao gerou nenhum documento de conhecimento durante as etapas ate falhar....↩ Follow-up injected: crie arquivos separados e pequenos de etapa em etapa uma etapa por vez...
-- **Outcome:** Feito. Criei a pasta `byp/docs/stack_c1_07_19/` com **5 arquivos pequenos, um por etapa**, gravando o conhecimento a cada passo em vez de acumular na memória: | Arquivo | Conteúdo | |---|---| | `00_overview.md` | Mapa do stack, bases, cadeia de chamadas, **descobertas-chave** | | `01_builder_0x59C260.md` | Builder completo do C1 07 19 (prologue, dispatch, montagem, send) | | `02_packet_obj_methods.md` | Métodos do objeto pacote (Reset/Clear/InsertAt/AddByte) | | `03_send_encrypt_0x404DB0.md` | Send + serial + SM encrypt (caminhos C3 e C4) | | `04_thunk_0x59B3C0.md` | Thunk/caller → Main.dll | ## Descoberta mais importante (corrige o doc anterior) O **"skill wire 0xE7C3" era uma leitura errada**. O byte `E7` é o **serial** (`MAIN_PACKET_SERIAL` em `0x08793700`), escrito por `0x404DB0` em `data[3]` **antes** do SM encrypt, **sobrescrevendo** o `skill_high` que o builder escreveu. ``` Builder monta: C1 07 19 [skillH] [skillL] [targetH] [targetL] Send sobrescreve: C1 07 19 [SERIAL] [skillL] [targetH] [targetL] ↓ SM::Encrypt (4 bytes → 11 bytes) Wire: C3 0D [11 bytes SM ciphertext] ``` Ou seja, o skill no ar é **1 byte** (`C3`), não 2. O `E7` é o serial do momento. ## Pendências (próximas etapas) 1. **Breakpoint live** em `0x59C725` (builder escreve skill) + `0x404E34` (send escreve serial) para capturar os valores reais de skill/target durante um cast. 2. Frames superiores do stack (`0x1B554F`, `0x1B7745`, `0xD957C`...) e a função em Main.dll (`0x67D68330`). Quer que eu siga para…
-- **Tools:** write_file, mcp_tool, edit_file, read_file, manage_todos, list_directory
+*   **Key Decisions & Technical Findings**
+    *   **Skill Wire Protocol:** Confirmed skill wire is 1 byte (`C3`). `E7` is identified as `MAIN_PACKET_SERIAL` overwritten before SM encryption.
+    *   **Injection Pipeline Clarification:**
+        *   `InjectC1Attack`: Handles `0x11`/`0x19` via `XorData` + Layer-1 → **C1** wire.
+        *   `InjectSkillC1`: Handles only `0x19` via `XorData` + SM + C3 wrapper + Layer-1 → **C3 0D [11]** wire.
+    *   **Discrepancy Identified:** Capture analysis suggests the correct skill path is **C1 pure** (same as `0x11`), implying `InjectSkillC1` (SM/C3) is likely incorrect based on a previous misread of `0xE7C3`. However, `AttackModule.cpp:207` currently still calls `InjectSkillC1`.
+    *   **Debugging Protocol:** Strict 1-BP rule established at `0x404E34` with condition `([EBP-0x2116]&0xFF)==0x19` to isolate the subtype byte.
 
-## 2026-11-15T18:52:17.247Z
-- **User:** entao, temos um problema. quando o bp fica ativo por mt tempo o char toma dc, entao vc deveria colocar bp, esperar bater nele, assim que bater vc consulta e desbloqueia, vc tem que manter limpo, no max 1 bp para ficar facil de vc controlar isso...
-- **Outcome:** Pronto. Setup limpo: - **1 BP** em `0x404E34` (serial write no Send) - Debugger **rodando** - Assim que você castar e bater no BP, me avisa — eu leio buffer + serial, apago o BP e continuo na hora. Manda o cast quando quiser.
-- **Tools:** mcp_tool, memory
+*   **Current State**
+    *   Build successful (`byp/dist/byp.dll`). Deployment to `F:\blackrockmu\` pending manual copy (game running).
+    *   Debugger active with corrected breakpoint at `0x404E34`.
+    *   New `[SKILLHOOK]` logs prepared to validate skill ID transformation.
 
-## 2026-11-15T18:56:13.774Z
-- **User:** pronto parou
-- **Outcome:** O debugger tá teimoso. Como você já está na janela do x32dbg, faz manual (é mais rápido): 1. **Apaga** o BP em `0x404E34` (right-click → Delete) 2. **Seta** BP novo em `0x404E34` (F2) 3. **Right-click** no BP → **Properties** 4. No campo **Condition**, digita: ``` [EBP-0x2118]==0xC1&&[EBP-0x2116]==0x19 ``` 5. Confirma que **Enabled** está marcado 6. **F9** (continue) Assim ele só quebra quando for o C1 07 19 (skill attack). Os outros C1 (como o 0C 0E que apanhamos) passam reto. Me avisa quando estiver pronto e eu sigo o protocolo: cast → hit → leio → apago → continuo.
-- **Tools:** mcp_tool
+*   **Open Threads**
+    *   **Critical Fix:** Determine if `AttackModule.cpp` should call `InjectC1Attack` instead of `InjectSkillC1` to match capture findings.
+    *   **Verification:** Cast skill to check if `[SKILLHOOK]` shows `flag=1` and `wireId=0xE7C3` (validating table `0x59C299`) or `flag=0`.
+    *   **Optimization:** Investigate reduction of `[SM] DecryptBlock` logs (~150 lines per 94-byte packet).
+    *   **Analysis:** Capture live values at `0x59C725` (builder) and `0x404E34` (send); analyze Main.dll function `0x67D68330`.
 
-## 2026-11-15T19:00:25.645Z
-- **User:** nao ta funcionando.... olha como ficou la...
-- **Outcome:** Achei o problema! `[EBP-0x2118]` lê um **DWORD** (4 bytes), não um byte. Então `[EBP-0x2118]==0xC1` nunca vai ser true porque ele lê `C1 07 19 XX` como `0xXX1907C1`. **Condição corrigida** (usa mask pra pegar só o byte do subtype): ``` ([EBP-0x2116]&0xFF)==0x19 ``` Isso lê o DWORD em `EBP-0x2116` (que começa com o byte do subtype = data[2]) e faz AND com 0xFF pra isolar só esse byte. Se for 0x19, quebra. No x32dbg: 1. Right-click no BP em `0x404E34` → **Properties** 2. Campo **Condition**: `([EBP-0x2116]&0xFF)==0x19` 3. OK → F9 Só vai quebrar no C1 07 **19**. Os outros C1 (0C 0E, etc.) passam reto.
-- **Tools:** none
+## 2026-11-15T20:51:48.492Z
+- **User:** acho que vamos ter mais pacotes que precisarao do xor e eles todos me parecem ter a mesma ideia certo e regra certo oq muda e o SM e envio correto?
+- **Outcome:** Exato — é isso. A regra do XorData é **idêntica para todos os pacotes**: ```cpp // PacketSniffer.cpp:468 — mesma função, mesma regra, auto-inversa for (int n = start; n < end; ++n) data[n] ^= (data[n - 1] ^ g_XorFilter[n % 32]); ``` - Sempre aplica nos bytes `[3, len)` (payload, após `C1 07 XX`) - XOR encadeado: cada byte depende do anterior (anchor = byte 2) - Key fixa `m_XorFilter` (tabela de 32 bytes do update ≥ 601) - É a própria inversa — aplicar duas vezes devolve o plaintext **O que muda por pacote** é só o "empacotamento final": | | XorData | SM | Wire | |---|---|---|---| | 0x11 (ataque normal) | ✓ | ✗ | C1 puro | | 0x19 (skill) | ✓ | ✓ (6→11, consome serial `0x08793700`) | C3 0D [11] | | outros C1 futuros | ✓ (mesma regra) | depende do que o builder do jogo fizer | C1 ou C3 | Ou seja: para qualquer pacote novo você sempre parte do **plaintext real**, aplica `GameServerXorData(buf, 3, len)`, e aí decide: vai **C1 puro** (só Layer-1) ou passa por **SM + C3** (lendo o serial de `0x08793700` e incrementando). **Uma ressalva** (já anotada no código, PacketSniffer.cpp:487): o XorData foi **validado por RE/captura só para 0x11 e 0x19**. Para outros opcodes (ex.: movimento) ainda não está confirmado — a regra é a mesma do `PacketManager::XorData` do MuEmu, mas antes de usar em um opcode novo vale validar com uma captura do wire e decifrar de trás para frente (a fórmula do doc `01_xor_decode_and_fix.md`): ``` original[n] = cifrado[n] ^ cifrado[n-1] ^ key[n % 32] ``` Se a deco…
+- **Tools:** read_file, search_files
 
-## 2026-11-15T19:13:32.812Z
-- **User:** ta no bp analise.
-- **Outcome:** Agora vou analisar o que temos. A situação: **Fato 1:** No builder (`0x59C725`), `[EBP-0x1C]` = **0x3C** (índice bruto) **Fato 2:** No pacote (send), skill = **0xE7C3** Isso confirma o que você disse — o skill ID **sofre transformação**. O caminho é a tabela em `0x59C299`: ```asm movzx eax, word [edx+ecx*2+0x78] ; wire ID da tabela ``` O problema: quando eu li a flag `[0x081C0398]`, estava 0. Mas provavelmente ela está **ativa durante o cast** e reseta depois. Meu BP em `0x59C725` deve ter pegado um **auto-attack diferente** (o jogo casta rapidinho). **Próximo passo:** BP em `0x59C2B8` (onde `[EBP-0x1C]` é escrito) com condição pra só pegar quando o valor for ≠ 0x3C. Ou melhor: BP direto em `0x59C299` (a instrução da tabela) — se bater, a tabela está ativa. Quer que eu monte o BP em `0x59C299`? Se bater, eu leio: - `ECX` = índice usado - `EDX` = base da tabela - `EAX` = wire ID resultante (deve ser 0xE7C3) Assim mapeamos a tabela inteira.
-- **Tools:** mcp_tool
+## 2026-11-15T20:54:27.292Z
+- **User:** entao todo metodo que precisar de xor data independente de qual seja deve chamar um metodo so, nao quero varios metodos espalhados. por exemplo o pacote de C1 de atack normal ja poderia ter chamado esse hhelper direto concorda? e o do c1 de skill chamar ele e logo em seguida fazer oq precisar para o SM. n'ao faze mais sentido? pq vejo que essa regra se encaixa em mais de um lugar...
+- **Outcome:** Concordo — e a boa notícia é que **já funciona exatamente assim**. O helper único já existe: ```cpp // PacketSniffer.cpp:468 — o ÚNICO método XOR do projeto static void GameServerXorData(char* data, int start, int end) { if (start >= end) return; for (int n = start; n < end; ++n) data[n] ^= (data[n - 1] ^ g_XorFilter[n % 32]); } ``` E os dois caminhos já chamam **ele**, sem duplicar a lógica: - `InjectC1Attack` (PacketSniffer.cpp:1687) → `GameServerXorData(buf, 3, len)` → Layer-1 → wire (C1 puro) - `InjectSkillC1` (PacketSniffer.cpp:1711) → `GameServerXorData(buf, 3, 7)` → SM → C3 → Layer-1 → wire Então a regra que você descreveu já está implementada: **um só lugar sabe o XOR**; cada pacote novo só decide o que fazer *depois* (C1 direto ou SM+C3). Não há nenhum outro lugar com a tabela `g_XorFilter` ou o loop encadeado — confirmei por busca, só existe em PacketSniffer.cpp:468-475. **O único ponto fraco:** ele é `static` (visível só dentro de PacketSniffer.cpp). Hoje tudo que injeta está nesse arquivo, então funciona. Mas se um dia outro módulo (ex.: um futuro pacote de movimento no AttackModule) precisar de XOR, ele não consegue chamá-lo. Se quiser, eu exponho no `PacketSniffer.h`: ```cpp namespace PacketSniffer { // XOR encadeado (Camada 2) em [start, end) — a regra única de XorData do jogo void ApplyXorData(uint8_t* data, int start, int end); } ``` Assim qualquer módulo novo faz: `ApplyXorData(buf, 3, len)` e segue com C1 ou SM. Faz essa exposição?
+- **Tools:** search_files
+
+## 2026-11-15T20:59:16.156Z
+- **User:** quero um plano para organizar as coisas agora que funcionou, to vendo mta coisa desorganizada em relacao a software, mt classe lingui;'ao que poderia ter subclasses objetos separados para ajudar na manutencao.
+- **Outcome:** Analisei o estado atual. O problema central: **PacketSniffer.cpp (1577 linhas) é um "god file"** com 6 responsabilidades misturadas, e há lixo morto. Aqui está o plano, em fases seguras (cada fase = 1 commit + build + teste em campo): ## Fase 0 — Limpeza (risco zero) - Apagar `src/PacketSniffer.cpp.new` (231 linhas, **não está no build** — build.bat:25 lista os .cpp e ele não aparece) - Corrigir comentários obsoletos: `AttackModule.h:34` ainda diz "0xEFF5 ... ataques normais **E skill**" (errado desde o fix do 0x19) ## Fase 1 — Extrair a criptografia (maior valor) Criar `src/MuCipher.h/.cpp` com **tudo que é cifra**, num lugar só: - `GameServerXorData` (o helper único de XOR que você pediu no turno anterior — sai de `static` e vira `MuCipher::XorData`, visível para qualquer módulo) - `GameServerEncryptLayer1` / `GameServerDecryptLayer1` / `FullEncrypt` / `FullDecrypt` - `GetGameServerKeys` + `GetMuHeaderSize` - `SimpleModulusCipher` já é classe separada — fica como está Resultado: qualquer pacote novo chama `MuCipher::XorData(buf, 3, len)` e decide C1 ou SM→C3. ## Fase 2 — Desmontar o god file PacketSniffer | Novo arquivo | Conteúdo (linhas atuais) | |---|---| | `WinsockHooks.cpp` | trampolines, `InstallInlineHook`, `HookSend/Recv/WSA*/Connect`, `Install/Uninstall` (~687–1140) | | `PacketReassembler.cpp` | buffers por socket, `ReadMuPacketLength`, `FlushReasmBuffer` (~502–600) | | `ControlSocket.cpp` | socket TCP do MuProxy2, threads connect/recv, `SendLine` (~57–330) — confe…
+- **Tools:** list_directory, run_command, lsp, search_files, read_file, glob
+
+## 2026-11-15T21:04:36.588Z
+- **User:** /opsx:explore
+- **Outcome:** O comando `/opsx:explore` não está definido neste workspace — procurei em `.novamind/`, `.vscode/` e pastas de `commands/` e não existe nenhum comando com esse nome (nem skill correspondente). Pode ser de outro plugin (estilo OpenSpec) que não está instalado aqui. O que você quer explorar? Dado o contexto, minhas apostas: 1. **Explorar a estrutura do PacketSniffer.cpp** em detalhe (mapear exatamente cada bloco de linhas → arquivo novo do plano de reorganização) 2. **Explorar o MuEmu server-side** (MoveSummon.h está aberto no editor — quer entender algo do servidor?) 3. **Explorar o overlap entre `TcpClient.cpp` e o socket de controle do PacketSniffer** (ponto de dúvida da Fase 2) Me diz qual — ou cola o que o `/opsx:explore` era suposto fazer.
+- **Tools:** glob, search_files
+
+## 2026-11-15T21:21:31.060Z
+- **User:** F:\blackrockmu\node_modules\@fission-ai
+- **Outcome:** Mapeado. O explore revelou algo que muda o plano: **existe uma família inteira de arquivos mortos** que nem compila. Aqui está o retrato real: ## O que está VIVO (build.bat:25) vs MORTO ``` +---------------------- byp.dll (14 .cpp no build) ----------------------+ | | | dllmain.cpp (orquestra tudo) | | | | | +-- Logger TcpClient (44412) PacketHandler | | | PacketHandler (CMD *) MessageRegistry | | | | | +-- PacketSniffer::Install() <-- god file, 1577 linhas | | | | | | | +-- hooks winsock (send/recv/WSA*/connect) | | | +-- reassembly TCP -> pacotes MU | | | +-- CRIPTO: Layer-1, XorData, GetGameServerKeys | | | +-- TCP proprio (44413, log de pacotes + SEND) | | | +-- name rewrite (HexDL) | | | +-- INJECAO: InjectToServer/C1Attack/SkillC1 + fila skill | | | | | +-- MonsterTracker AttackModule (+~400 linhas de debug RE) | | +-- SkillHook SimpleModulusCipher ViewportMap SkillMap | | +-- GameMemory (40 getters inline em 1 namespace flat) | +-------------------------------------------------------------------------+ MORTOS (nao estao no build, so ocupam espaco): PsBypass.cpp DllNotifyHook.cpp MainPatcher.cpp PsPacketHook.cpp StartupHook.cpp AsyncScanner.cpp VPTracer.cpp <- familia PS.dll PacketSniffer.cpp.new <- rascunho ``` ## Descobertas que ajustam o plano anterior 1. **Dois canais TCP, não um** — dúvida da Fase 2 resolvida: `TcpClient` (44412) é o canal de **comandos** (CMD ATTACK...), e o socket do PacketSniffer (44413) é o canal de **pacotes** (log PKT + SEND). Não há overlap …
+- **Tools:** list_directory, glob, ask_user, run_command, read_file, search_files
+
+## 2026-11-15T21:46:29.502Z
+- **User:** /opsx:propose
+- **Outcome:** Change **`reorganize-byp-modules`** criado e validado. Todos os artefatos de planejamento estão prontos. ## O que foi criado Local: `openspec/changes/reorganize-byp-modules/` | Artefato | Conteúdo | |---|---| | **proposal.md** | Why (god file + código morto + 3 portas de injeção), What Changes (7 itens), Impact. Marcado como **refactor pura** → `skip_specs: true`. | | **specs/** | *skipped* — refactor sem mudança de comportamento observável. | | **design.md** | 6 decisões (D1–D6) com alternativas rejeitadas, riscos com mitigações, Migration Plan em 8 fases, 2 Open Questions. | | **tasks.md** | 9 grupos / ~30 tasks com checkbox, cada uma com verificação embutida, em ordem de risco crescente. | ## Decisões-chave no design - **D1 — Porta única de injeção** `Inject(plaintext, len)` com `switch` por opcode (0x11 → C1 puro; 0x19 → SM→C3), em vez de herança. - **D2 — `MuCipher`** como módulo de cifra única; `XorData` vira a única porta de XOR. - **D3 — God file → 5 módulos** (`WinsockHooks`, `PacketReassembler`, `CommandChannel`/`PacketChannel`, `PacketInjector`, `NameRewriter`). - **D4 — `DebugTools`** sai do `AttackModule`. - **D5 — `GameMemory`** em sub-grupos. - **D6 — Remover** (não arquivar) a família PS.dll + rascunho + fila de skill. ## ⚠️ 2 pontos para você confirmar antes do apply 1. **D1** — porta única com `switch` (minha recomendação) **vs** hierarquia `NormalAttack`/`SkillAttack` (seu instinto original). Muda só a Fase 4/5. 2. **D5** — renomear os getters (`Player::Lev…
+- **Tools:** read_file, manage_todos, edit_file, write_file, run_command

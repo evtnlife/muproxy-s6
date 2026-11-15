@@ -414,7 +414,7 @@ namespace WinFormsMitm
                     ushort skillId = (ushort)(data[off + 1] | (data[off + 2] << 8));
                     byte level = (byte)(data[off + 3] >> 3); // decode: level is in high 5 bits
                     if (skillId == 0 || skillId == 0xFFFF) continue;
-                    skills.Add(new SkillOption(GetSkillName(skillId, level), skillId, 0xCF));
+                    skills.Add(new SkillOption(GetSkillName(skillId, level), skillId));
                 }
 
                 if (skills.Count == 0) return;
@@ -479,13 +479,16 @@ namespace WinFormsMitm
         private void PopulateSkills(ComboBox cbSkills)
         {
             cbSkills.Items.Clear();
-            cbSkills.Items.Add(new SkillOption("Aguardando skills...", 0x1E, 0xCF));
+            cbSkills.Items.Add(new SkillOption("Aguardando skills...", 0));
             cbSkills.DisplayMember = "Name";
             cbSkills.ValueMember = "Name";
             cbSkills.SelectedIndex = 0;
         }
 
-        private record SkillOption(string Name, int Action, int Dir)
+        // Action = SkillNumber (2B LE do F3 11) — o MESMO valor que o AttackModule
+        // codifica no pacote C1 07 19 [skillH][skillL] (ex: Force = 60 = 0x003C).
+        // 0 = ainda sem skill (byp.dll usa o defaultSkillId).
+        private record SkillOption(string Name, int Action)
         {
             public override string ToString() => Name;
         }
