@@ -1,56 +1,58 @@
 
 
-## Consolidated Summary (updated 2026-11-15T03:23:47.174Z)
-**Knowledge Base Reset**
-- **Action:** Compacted `knowledge.md` from 48 KB (842 lines) to 1.4 KB (26 lines) to prepare for new work.
-- **Removed:** All completed session logs (F3 11 SkillList parsing, DC fix via byte-order `[indexH][skillH][indexL][skillL]`, Python C3 migration, `LogPacketDual`, packet force analysis, and `psdisabled`→`byp` rename).
-- **Preserved:** Header pointers to durable knowledge sources:
-  - **Skill:** `blackrockmu` (SKILL.md + `references/01..10`) is the source of truth.
-  - **Persistent Memory:** Attach flow, ex603 version details.
-  - **Docs:** `byp/docs/` and `OpenMU-master/docs/Packets/`.
-  - **Rules:** `byp/` folder structure, build process, language settings.
-
-**Logging System Refactor (`byp/gg_bypass2`)**
-- **Goal:** Eliminate log pollution; consolidate into a single game-folder log; reduce attack noise.
-- **File Consolidation:**
-  - Removed `byp_packets.log` (2.8 MB) and cleaned `gg_bypass2.log` (41 MB).
-  - **`src/include/Config.h`:** Removed `PACKET_LOG_FILENAME`; now uses only `LOG_FILENAME`.
-  - **`src/include/Logger.h` & `src/Logger.cpp`:** `Initialize` accepts a single path. Removed `g_PacketLogFile`; `LogPacket` and `LogPacketDual` now write to the unified `g_LogFile` (format: `hex=... dec=...`).
-  - **`src/dllmain.cpp`:** `InitializeLogging` mounts only one file path.
-- **Attack Log Reduction (`src/AttackModule.cpp`):**
-  - **Removed Logs:** `ComputeDir` (normal attack direction), `SendAttack` (per-hit log + 0x11 packet hex dump), `SendConfiguredAttack` (redundant per-hit log), and `Dispatcher` status (every 800ms).
-  - **Retained Logs:** All skill-related logs (`ComputeSkillDir`, 4-line `SkillAttack` details including entity/XOR/gameGlobal/dir/plain), lifecycle events (Watcher/Dispatcher start/stop, START/STOP/CONFIG), monster detection/removal, and on-demand diagnostics (DUMP, HEXDUMP, SCANVALUE, SCANSLOT, DIRSCAN via MuProxy2).
-
-**Current State**
-- **Build:** `build.bat` compiled successfully with no errors.
-- **Ready:** System is optimized for low-noise operation; only skill attacks and critical lifecycle events are logged to the single `gg_bypass2.log` file.
-
-## 2026-11-15T01:42:20.544Z
-- **User:** continue
-- **Outcome:** Tudo concluído. Resumo das mudanças: ## Fase 1 — Consolidação de logs ✅ - **`src/include/Logger.h`** — `Initialize` agora recebe um único caminho; `PACKET_LOG_FILENAME` removido de `Config.h` - **`src/Logger.cpp`** — `g_PacketLogFile` eliminado; todo o output (geral + pacotes) vai para `gg_bypass2.log` - **`src/dllmain.cpp`** — `InitializeLogging` monta apenas o caminho único - **`src/AttackModule.cpp`** — removidos 4 pontos de log de ataque normal (`ComputeDirection`, `SendAttack` por hit, diagnóstico redundante em `SendConfiguredAttack`, log por ciclo do Dispatcher). Restam: ataques de skill, eventos de lifecycle (Watcher/Dispatcher, add/remove de monstro) e diagnósticos sob demanda (DUMP/HEXDUMP/SCANVALUE/SCANSLOT/DIRSCAN) ## Fase 2 — Formato do sniffer ✅ - **`src/Logger.cpp`** — `LogPacketDual` imprime `dec=<decoded> enc=<wire>` (decifrado primeiro, wire depois) - **`src/PacketSniffer.cpp`**: - `TryDecodeC3C4` — decifra C3/C4 (Layer-1 XOR+sub **e** SM) para mostrar o plaintext real - `LogRaw` — usa `TryDecodeC3C4` e chama `LogPacketDual` com as duas formas - `HookSend` — removidos EBP, stack trace, hex dump, bloco SM debug - `HookRecv`/`HookWSASend`/`WSARecv` — logs de ruído removidos - `ProcessSkillQueue` — passo-a-passo removido nos caminhos BUILDER e MANUAL - `InjectToServer` (~linha 1410) — adicionado `LogPacketDual("PACKETSNIFFER", "SEND", ...)` entre a criptografia e o `TrueSend`, já que injetados não passam pelo `HookSend` ## Verificação - Build via `build.bat`: **…
-- **Tools:** edit_file, search_files, run_command, read_file, manage_todos
-
-## 2026-11-15T01:49:45.287Z
-- **User:** vc removeu errado, nao quero esse tipo [2026-11-14 17:44:04.493] [PACKETSNIFFER] [RECV] len=66 dec=C10F2E457465726E616C57697A0000C10F2E506B64307200000000000000C10644020A1AC10F2E457465726E616C57697A0000C10F2E506B64307200000000000000 enc=FE20037A4D5A4F435E456846B73131FE200361445D014F31313131313131FE3B7D3F2717FE20037A4D5A4F435E456846B73131FE200361445D014F31313131313131 .. quero o outro com o stack trace e o pacote human readable....
-- **Outcome:** Corrigido. O formato antigo voltou, mantendo o arquivo único de log: ## O que foi revertido - **`src/PacketSniffer.cpp`** — restaurado do git (HEAD): - `LogStackTrace` (walk de EBP) de volta, com stack trace em `HookSend`/`HookWSASend` - Decodificação human-readable de C3/C4 (`SEND C3 decoded: [C1 0F ...] dk=...`) - Logs passo-a-passo do `ProcessSkillQueue` (BUILDER/MANUAL) - `recv() ret=`, `WSASend: %d bytes [hex]`, etc. - `LogRaw` volta a chamar `LogPacketDual`/`LogPacket` com os bytes raw + decifrados ## O que foi mantido (Fase 1) - **Arquivo único** `gg_bypass2.log` — `Logger.cpp` continua com um só `g_LogFile` (sem `byp_packets.log`) - **Labels antigos restaurados**: `LogPacket` → `hex=<raw>`; `LogPacketDual` → `hex=<raw> dec=<decrypted>` (ordem antiga: raw primeiro, dec depois) - **`AttackModule.cpp`** — redução de logs de ataque normal continua valendo (só skill attacks logam) ## Verificação - Build via `build.bat`: **sucesso**, `byp.dll` copiado para `F:\blackrockmu\` - Diagnósticos: **0 erros** Agora o log volta a ter stack trace + pacote human-readable, tudo em `gg_bypass2.log`.
-- **Tools:** git, edit_file, search_files, run_command
-
-## 2026-11-15T02:58:29.304Z
-- **User:** e o stack trace foi mantido? na real a como havia mencionado antes de cair, a gente inverteu ne, esse packetsniffer log sem stacktrace, sem dados de oq tinha na memoria, sem o dump da regiao e pobre e nao me ajuda identificar o pacote...
-- **Outcome:** Pronto. Resumo do que foi feito: ## Removido (o padrão que tava poluindo) - **`src/PacketSniffer.cpp` — `LogRaw`** (linhas ~637): tirei as chamadas `Logger::LogPacketDual`/`Logger::LogPacket` que geravam a parede de hex `[RECV] len=994 hex=... dec=...`. A reassembly + `FlushReasmBuffer` (que envia os pacotes decifrados ao MuProxy2) **continua intacta** — só o log de hex bruto sumiu. - Atualizei o comentário da função pra refletir que ela só faz reassembly + proxy agora. ## Mantido (o padrão detalhado que você quer) Tudo do `HookSend`/`HookWSASend` ficou como está: - `SEND C3 24 bytes [C3 18 E8 99 ...]` (header + hex) - `SEND stack: Main.dll+0xBB3DE ...` (stack trace via EBP) - `SEND C3 decrypt (native/own): OK/FAILED` - `SEND C3>C1 decoded: [C1 0C 0E ...] dk=01` (human-readable) - Todos os logs `[SMOD]` detalhados ## Verificação - Build via `build.bat`: **sucesso**, `byp.dll` copiado pra `F:\blackrockmu\` - Diagnósticos: **0 erros** --- Sobre **"se der pra melhorar esse padrão"** — o que ainda é bem verboso é o bloco `[SMOD] DecryptBlock #N`, que repete `Mod/Dec/Xor` + `ringBuf[0..3]` + `slot[0..3]` (com `32bit=`/`product64=`) **a cada bloco de 8 bytes**. Num pacote de 94 bytes são ~12 blocos × ~12 linhas = ~150 linhas de SMOD. Quer que eu **condensa** isso? Posso: - Logar as chaves (`Mod/Dec/Xor`) **uma vez só** por operação de decrypt (em vez de a cada bloco) - Nos blocos depois do primeiro, logar só `plaintext` + `checksum` (sem o detalhe de ring/slot/product64) Isso manté…
-- **Tools:** search_files, ask_user, edit_file, run_command
-
-## 2026-11-15T03:03:44.051Z
-- **User:** qual diferenca do native para nao native [2026-11-14 18:59:06] [PACKETSNIFFER] SEND C3 24 bytes [C3 18 C6 DC 37 B7 51 2E E2 BB CC E9 DC 20 FD 3E A1 00 04 33 BA 9C E5 DB ] [2026-11-14 18:59:06] [PACKETSNIFFER] SEND stack: Main.dll+0xBB3DE main.exe+0x5153 main.exe+0x4EF9 main.exe+0x4D9A main.exe+0xD37F7 main.exe+0xD021F USER32.dll+0x41C0B USER32.dll+0x382CA USER32.dll+0x379F6 USER32.dll+0x361FB opengl32.dll+0x473AF USER32.dll+0x41C0B USER32.dll+0x382CA USER32.dll+0x36B70 USER32.dll+0x288F0 main.ex…
-- **Outcome:** Agora tenho o quadro completo. A diferença entre os dois caminhos: ## `NativeDecrypt` (nativo) — linha 205 Chama a **função de decrypt do próprio jogo** em `main.exe+0x598490` (absoluto `0x998490`), passando o objeto SM global do jogo em `0x8797778` como `this` (calling convention `__thiscall`). É "100% idêntico ao jogo" em algoritmo — usa o código compilado do BlackRock. ## `Decrypt` (own / não-nativo) — linha 355 Nossa **reimplementação em C++** do mesmo algoritmo. Em vez de chamar a função do jogo, lê as chaves do objeto SM pra `m_keys[]` e faz a matemática nós mesmos (unpack de bits via `AddBits`, reverse XOR chain, multiplicação modular, reconstrução do plaintext, validação de checksum). ## A diferença crucial: as chaves DecKey O objeto SM tem dois slots de chave (comentário linhas 24-27): - **`+0x14` = EncKey** — usado pela função de *encrypt* do jogo - **`+0x24` = DecKey** — usado pela função de *decrypt* do jogo **Problema:** pra pacotes C2S (client→server), o objeto `Obj1` em `0x8797778` tem **DecKey = zeros** no slot `+0x24`. O jogo só guarda o EncKey ali, porque o cliente só *cifra* pro servidor — nunca *decifra* C2S. Então: - **Nativo** → a função do jogo lê o DecKey de `+0x24`, encontra **zeros**, decifra errado, o checksum interno falha → retorna `-1` (o `FAILED (decLen=-1)` do seu log) - **Own** → em `Initialize()` (linha 83) a gente **computa** `decKey[i] = ModInverse32(encKey[i], modulus[i])` — a inversa modular do EncKey. Como `(encKey * decKey) % modulus ==…
-- **Tools:** read_file
-
-## 2026-11-15T03:12:13.951Z
-- **User:** sim. deixe so o fallback que se torna principal.
-- **Outcome:** Pronto. O fallback (own `Decrypt`) agora é o caminho único de decifragem: ## Mudanças - **`src/PacketSniffer.cpp`** (`HookSend`, ~linha 768): removida a tentativa `NativeDecrypt` + fallback. Agora chama direto `SimpleModulusCipher::Decrypt`. Os logs ficaram: - `SEND C3 decrypt: OK decLen=11` (antes: `(native): FAILED... trying own decrypt` + `(own): OK`) - Sumiram as linhas `[SMOD] NativeDecrypt: smObj=...` de cada pacote - **`src/SimpleModulusCipher.cpp`**: função `NativeDecrypt` removida (código morto), deixado um comentário documentando o endereço do jogo (`0x998490`) e o motivo da remoção (DecKey zero no Obj1) - **`src/include/SimpleModulusCipher.h`**: declaração `NativeDecrypt` removida; `NativeEncrypt` mantido (usado no self-test de `Initialize`) ## O que o log vai mostrar agora (por pacote C3/C4) ``` [PACKETSNIFFER] SEND C3 24 bytes [C3 18 C6 DC ...] [PACKETSNIFFER] SEND stack: Main.dll+0xBB3DE ... [SMOD] SM input bytes (22): [C6 DC 37 B7 ...] [SMOD] DecryptBlock #27: src=[...] ring=[...] checksum OK [PACKETSNIFFER] SEND C3 decrypt: OK decLen=11 [PACKETSNIFFER] SEND C3>C1 decoded: [C1 0C 0E ...] dk=0A ``` ## Verificação - Build via `build.bat`: **sucesso**, `byp.dll` copiado pra `F:\blackrockmu\` - Diagnósticos: **0 erros** nos dois arquivos editados O ruído de `DecryptBlock` (ring/slot a cada bloco) continua lá — se quiser, ainda posso condensa como ofereci antes (chaves logadas uma vez só + blocos subsequentes só com plaintext/checksum). É só dizer.
-- **Tools:** search_files, edit_file, run_command
+## Consolidated Summary (updated 2026-11-15T19:13:57.149Z)
+*   **Objective:** Optimize `gg_bypass2` logging by consolidating output to `gg_bypass2.log` and standardizing decryption to the non-native method.
+*   **Log Consolidation:**
+    *   Removed `byp_packets.log` and `PACKET_LOG_FILENAME` from `src/include/Config.h`.
+    *   Updated `src/include/Logger.h` and `src/Logger.cpp`: Deleted `g_PacketLogFile`; `Initialize` now accepts a single path. All logs write exclusively to `g_LogFile`.
+*   **Decryption Standardization:**
+    *   **`src/PacketSniffer.cpp`:** Removed `NativeDecrypt` call and fallback logic in `HookSend`. Now directly calls `SimpleModulusCipher::Decrypt` (non-native/own algorithm). This eliminates "native failed" noise and relies on C++ reimplementation (modular inverse of `EncKey`) which handles C2S decryption correctly (unlike native which fails due to zeroed `DecKey`).
+    *   **`src/SimpleModulusCipher.cpp/.h`:** Removed `NativeDecrypt` implementation and declaration. Kept `NativeEncrypt` for self-tests.
+*   **Diagnostic Restoration (`src/PacketSniffer.cpp`):**
+    *   Reverted file to Git HEAD to reinstate `LogStackTrace` (EBP walk) in `HookSend`/`HookWSASend`.
+    *   Restored human-readable C3/C4 decoding (`SEND C3 decoded: ... dk=...`) and step-by-step `ProcessSkillQueue` logs.
+    *   Re-enabled verbose noise: `recv()` return values, `WSASend` byte counts/hex dumps, and SM debug blocks.
+    *   **Format Standard:** `LogPacket` outputs `hex=<raw>`; `LogPacketDual` outputs `hex=<raw> dec=<decrypted>` (raw first).
+*   **Attack Module (`src/AttackModule.cpp`):**
+    *   Reduced logging for normal attacks (removed `ComputeDir`, per-hit hex dumps, 800ms status logs).
+    *   Retained full logging for skill attacks (direction, entity/XOR details), lifecycle events, and on-demand diagnostics (DUMP, HEXDUMP).
+*   **Injection Logging:**
+    *   Added `LogPacketDual("PACKETSNIFFER", "SEND", ...)` in `InjectToServer` (~line 1410) to capture injected packets bypassing `HookSend`.
+*   **Recent Adjustment:**
+    *   Removed `Logger::LogPacketDual`/`LogPacket` calls from `LogRaw` to reduce hex wall noise, keeping reassembly/proxy logic intact.
+*   **Current State:**
+    *   Build via `build.bat` successful; `byp.dll` deployed to `F:\blackrockmu\`.
+    *   Zero build errors.
+    *   System logs to single `gg_bypass2.log` with restored stack traces and human-readable packet details; low noise for non-skill traffic.
+*   **Open Threads:**
+    *   Investigate condensation of `[SMOD] DecryptBlock #N` logs (currently ~150 lines per 94-byte packet due to repeated Mod/Dec/Xor details per 8-byte block).
 
 ## 2026-11-15T03:23:22.867Z
 - **User:** agora que vc ja atualizou os logs. quero que vc atualize a skill que temos para ela saber analisar os logs da forma correta durante as sessoes de debug, sem ficar perdida...
 - **Outcome:** Skill atualizada. Resumo do que foi feito: ## Nova referência: `references/11-log-analysis.md` Tudo verificado contra o código-fonte atual (Logger.cpp, PacketSniffer.cpp, SimpleModulusCipher.cpp, AttackModule.cpp): - **Onde o log mora** — arquivo único `F:\blackrockmu\gg_bypass2.log`, append + `_SH_DENYNO`; MuProxy2 escreve em `logs/` (subpasta, sem conflito); formato `[data hora] [TAG] msg` - **O que NÃO está no log (de propósito)** — sem hex dump do `LogRaw`, sem linhas `NativeDecrypt`, ataques normais (0x11) não logam nada - **Exemplo de um SEND C3 saudável** — o fluxo completo: `SEND C3 N bytes` → `SEND stack:` → `SM input bytes` → `DecryptBlock #N` → `ring/finale` → `checksum calc/expected` → `SEND C3 decrypt: OK` → `SEND C3>C1 decoded: [...] dk=..` - **SMOD por bloco** — o que é sempre logado vs. verbose (só primeiros 10 blocos) vs. em caso de falha (comparação Live vs. Cached keys) - **Bloco de init SMOD** — como ler o dump de 72 bytes, `Verify mod inverse` (OK/FAIL), `Roundtrip` (MATCH/MISMATCH) e `NativeEncrypt->ourDecrypt` - **Tag ATTACK** — linhas de skill attack, lifecycle, e diagnósticos on-demand - **Tabela de debug recipes** — sintoma → causa → próximo passo (8 linhas) ## Correções em referências existentes - **`SKILL.md`** — linha 11 na tabela + quick fact apontando pro §11 - **`03-crypto.md`** — `NativeDecrypt` marcado como removido; own `Decrypt` é o caminho único de C3/C4 - **`07-build-deploy.md`** — log único, `byp_packets.log` removido - **`08-config.md`*…
 - **Tools:** skill, search_files, read_file, manage_todos, write_file, edit_file, todo
+
+## 2026-11-15T17:48:26.437Z
+- **User:** vc analisou analisou e analisou e nao gerou nenhum documento de conhecimento durante as etapas ate falhar....↩ Follow-up injected: crie arquivos separados e pequenos de etapa em etapa uma etapa por vez...
+- **Outcome:** Feito. Criei a pasta `byp/docs/stack_c1_07_19/` com **5 arquivos pequenos, um por etapa**, gravando o conhecimento a cada passo em vez de acumular na memória: | Arquivo | Conteúdo | |---|---| | `00_overview.md` | Mapa do stack, bases, cadeia de chamadas, **descobertas-chave** | | `01_builder_0x59C260.md` | Builder completo do C1 07 19 (prologue, dispatch, montagem, send) | | `02_packet_obj_methods.md` | Métodos do objeto pacote (Reset/Clear/InsertAt/AddByte) | | `03_send_encrypt_0x404DB0.md` | Send + serial + SM encrypt (caminhos C3 e C4) | | `04_thunk_0x59B3C0.md` | Thunk/caller → Main.dll | ## Descoberta mais importante (corrige o doc anterior) O **"skill wire 0xE7C3" era uma leitura errada**. O byte `E7` é o **serial** (`MAIN_PACKET_SERIAL` em `0x08793700`), escrito por `0x404DB0` em `data[3]` **antes** do SM encrypt, **sobrescrevendo** o `skill_high` que o builder escreveu. ``` Builder monta: C1 07 19 [skillH] [skillL] [targetH] [targetL] Send sobrescreve: C1 07 19 [SERIAL] [skillL] [targetH] [targetL] ↓ SM::Encrypt (4 bytes → 11 bytes) Wire: C3 0D [11 bytes SM ciphertext] ``` Ou seja, o skill no ar é **1 byte** (`C3`), não 2. O `E7` é o serial do momento. ## Pendências (próximas etapas) 1. **Breakpoint live** em `0x59C725` (builder escreve skill) + `0x404E34` (send escreve serial) para capturar os valores reais de skill/target durante um cast. 2. Frames superiores do stack (`0x1B554F`, `0x1B7745`, `0xD957C`...) e a função em Main.dll (`0x67D68330`). Quer que eu siga para…
+- **Tools:** write_file, mcp_tool, edit_file, read_file, manage_todos, list_directory
+
+## 2026-11-15T18:52:17.247Z
+- **User:** entao, temos um problema. quando o bp fica ativo por mt tempo o char toma dc, entao vc deveria colocar bp, esperar bater nele, assim que bater vc consulta e desbloqueia, vc tem que manter limpo, no max 1 bp para ficar facil de vc controlar isso...
+- **Outcome:** Pronto. Setup limpo: - **1 BP** em `0x404E34` (serial write no Send) - Debugger **rodando** - Assim que você castar e bater no BP, me avisa — eu leio buffer + serial, apago o BP e continuo na hora. Manda o cast quando quiser.
+- **Tools:** mcp_tool, memory
+
+## 2026-11-15T18:56:13.774Z
+- **User:** pronto parou
+- **Outcome:** O debugger tá teimoso. Como você já está na janela do x32dbg, faz manual (é mais rápido): 1. **Apaga** o BP em `0x404E34` (right-click → Delete) 2. **Seta** BP novo em `0x404E34` (F2) 3. **Right-click** no BP → **Properties** 4. No campo **Condition**, digita: ``` [EBP-0x2118]==0xC1&&[EBP-0x2116]==0x19 ``` 5. Confirma que **Enabled** está marcado 6. **F9** (continue) Assim ele só quebra quando for o C1 07 19 (skill attack). Os outros C1 (como o 0C 0E que apanhamos) passam reto. Me avisa quando estiver pronto e eu sigo o protocolo: cast → hit → leio → apago → continuo.
+- **Tools:** mcp_tool
+
+## 2026-11-15T19:00:25.645Z
+- **User:** nao ta funcionando.... olha como ficou la...
+- **Outcome:** Achei o problema! `[EBP-0x2118]` lê um **DWORD** (4 bytes), não um byte. Então `[EBP-0x2118]==0xC1` nunca vai ser true porque ele lê `C1 07 19 XX` como `0xXX1907C1`. **Condição corrigida** (usa mask pra pegar só o byte do subtype): ``` ([EBP-0x2116]&0xFF)==0x19 ``` Isso lê o DWORD em `EBP-0x2116` (que começa com o byte do subtype = data[2]) e faz AND com 0xFF pra isolar só esse byte. Se for 0x19, quebra. No x32dbg: 1. Right-click no BP em `0x404E34` → **Properties** 2. Campo **Condition**: `([EBP-0x2116]&0xFF)==0x19` 3. OK → F9 Só vai quebrar no C1 07 **19**. Os outros C1 (0C 0E, etc.) passam reto.
+- **Tools:** none
+
+## 2026-11-15T19:13:32.812Z
+- **User:** ta no bp analise.
+- **Outcome:** Agora vou analisar o que temos. A situação: **Fato 1:** No builder (`0x59C725`), `[EBP-0x1C]` = **0x3C** (índice bruto) **Fato 2:** No pacote (send), skill = **0xE7C3** Isso confirma o que você disse — o skill ID **sofre transformação**. O caminho é a tabela em `0x59C299`: ```asm movzx eax, word [edx+ecx*2+0x78] ; wire ID da tabela ``` O problema: quando eu li a flag `[0x081C0398]`, estava 0. Mas provavelmente ela está **ativa durante o cast** e reseta depois. Meu BP em `0x59C725` deve ter pegado um **auto-attack diferente** (o jogo casta rapidinho). **Próximo passo:** BP em `0x59C2B8` (onde `[EBP-0x1C]` é escrito) com condição pra só pegar quando o valor for ≠ 0x3C. Ou melhor: BP direto em `0x59C299` (a instrução da tabela) — se bater, a tabela está ativa. Quer que eu monte o BP em `0x59C299`? Se bater, eu leio: - `ECX` = índice usado - `EDX` = base da tabela - `EAX` = wire ID resultante (deve ser 0xE7C3) Assim mapeamos a tabela inteira.
+- **Tools:** mcp_tool

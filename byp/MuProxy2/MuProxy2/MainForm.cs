@@ -426,15 +426,21 @@ namespace WinFormsMitm
                 return;
             }
 
-            // F3 E2 (SkillCast): eventos de uso com posição — fonte complementar
+            // F3 E2 (SkillCast): eventos de uso com posição.
             // entry: [0..1] skillId(2B LE), [2..3] flags, [4..19] pos(4 floats), [20..21] level(2B LE)
+            //
+            // ATENÇÃO: NÃO popola o combo a partir do F3 E2. O F3 E2 traz skills de
+            // TODAS as entidades do viewport (monstros e outros jogadores lançando
+            // skills), não apenas as skills do próprio personagem. Isso fazia skills
+            // que o personagem NÃO possui aparecerem no combo. A fonte confiável das
+            // skills do personagem é o F3 11 (SkillList) acima. Aqui só logamos.
             if (subcode == 0xE2)
             {
                 int count = data[dataStart];
                 int entryStart = dataStart + 1;
                 const int ENTRY_SIZE = 24;
 
-                var skills = new List<SkillOption>();
+                int casts = 0;
                 int maxEntries = Math.Min(count, (data.Length - entryStart) / ENTRY_SIZE);
                 for (int i = 0; i < maxEntries; i++)
                 {
@@ -442,17 +448,12 @@ namespace WinFormsMitm
                     if (off + ENTRY_SIZE > data.Length) break;
 
                     ushort skillId = (ushort)(data[off] | (data[off + 1] << 8));
-                    ushort level = (ushort)(data[off + 20] | (data[off + 21] << 8));
                     if (skillId == 0 || skillId == 0xFFFF) continue;
-                    skills.Add(new SkillOption(GetSkillName(skillId, level), skillId, 0xCF));
+                    casts++;
                 }
 
-                if (skills.Count == 0) return;
-                if (InvokeRequired)
-                    BeginInvoke(() => MergeSkillCombo(cbSkills, skills));
-                else
-                    MergeSkillCombo(cbSkills, skills);
-                Log(new LogEvent(DateTime.Now, $"[SKILL] F3 E2: {skills.Count} casts observados"));
+                if (casts > 0)
+                    Log(new LogEvent(DateTime.Now, $"[SKILL] F3 E2: {casts} casts observados (não adicionados ao combo)"));
             }
         }
 

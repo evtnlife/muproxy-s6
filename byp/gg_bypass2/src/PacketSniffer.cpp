@@ -1473,27 +1473,51 @@ static void ProcessSkillQueue() {
             Logger::Log("PACKETSNIFFER", "MANUAL path — skillId=0x%04X attackId=0x%04X",
                         entry.skillId, entry.attackId);
 
-            // Formar C1 payload (sem header C1+size):
-            // [opcode] [skillH] [skillL] [targetH] [targetL]
-            uint8_t c1Payload[8];
-            int payloadLen = entry.len - 2;  // skip C1 + size bytes
-            if (payloadLen <= 0 || payloadLen > 6) {
-                Logger::Log("PACKETSNIFFER", "MANUAL: invalid payload len=%d (entry.len=%d)", payloadLen, entry.len);
+            // Formar SM input = [decKey] [C1 payload]
+            //
+            // O jogo SM-encrypta 6 bytes: [decKey] [19] [skillH] [skillL] [targetH] [targetL]
+            // Evidência (log do jogo): C3 decrypta para [2C] [19 E7 C3 E3 24] (6 bytes),
+            // onde 2C é o decKey (stream[0], não faz parte do payload) e
+            // 19 E7 C3 E3 24 é o C1 payload (5 bytes).
+            //
+            // O servidor SM-decrypta, pula o stream[0] (decKey) e usa stream[1..] como
+            // payload do C1. Sem o decKey, o payload desloca 1 byte e o sub-opcode
+            // fica 0xED (inválido) → servidor rejeita o pacote.
+            //
+            // entry.data = [C1] [07] [19] [skillH] [skillL] [targetH] [targetL]
+            // C1 payload (sem C1+size) = entry.data + 2 = [19] [skillH] [skillL] [targetH] [targetL] (5 bytes)
+            // SM input = [decKey] + C1 payload = 6 bytes
+            //
+            // O decKey (stream[0]) é o MAIN_PACKET_SERIAL do cliente — um contador
+            // de 1 byte que o jogo incrementa a cada C3 enviado (DataSend, Protocol.cpp:504:
+            //   EncBuff[1] = (*(BYTE*)MAIN_PACKET_SERIAL)++;  MAIN_PACKET_SERIAL = 0x08793700).
+            // O servidor valida esse serial contra o valor esperado; se não bater, rejeita.
+            //
+            // Antes usávamos um `static g_decKey = 0` LOCAL, fora de sincronia com o serial
+            // real do jogo (que já estava em 0x30 no log) → servidor rejeitava todos os
+            // pacotes de skill injetados. Agora lemos o serial real do cliente, usamos como
+            // decKey e incrementamos — assim o próximo C3 do jogo continua na sequência.
+            uint8_t* pSerial = (uint8_t*)0x08793700;            // MAIN_PACKET_SERIAL (abs)
+            uint8_t smInput[8];
+            int c1PayloadLen = entry.len - 2;  // C1 payload sem C1+size = 5 bytes
+            if (c1PayloadLen <= 0 || c1PayloadLen > 6) {
+                Logger::Log("PACKETSNIFFER", "MANUAL: invalid payload len=%d (entry.len=%d)", c1PayloadLen, entry.len);
                 continue;
             }
-            // entry.data = [C1] [07] [19] [skillH] [skillL] [targetH] [targetL]
-            // payload = entry.data + 2 = [19] [skillH] [skillL] [targetH] [targetL]
-            memcpy(c1Payload, entry.data + 2, payloadLen);
-
+            smInput[0] = *pSerial;                               // decKey = serial real do cliente
+            memcpy(smInput + 1, entry.data + 2, c1PayloadLen);  // C1 payload (stream[1..])
+            (*pSerial)++;                                        // consome o serial (jogo continua em sync)
+            int payloadLen = c1PayloadLen + 1;                  // inclui o decKey = 6 bytes
+            
             char payloadHex[32];
             int ph = 0;
             for (int i = 0; i < payloadLen && ph + 3 < (int)sizeof(payloadHex); i++)
-                ph += snprintf(payloadHex + ph, sizeof(payloadHex) - ph, "%02X ", c1Payload[i]);
-            Logger::Log("PACKETSNIFFER", "MANUAL: C1 payload [%s] len=%d", payloadHex, payloadLen);
-
-            // SM-encrypt o payload
+                ph += snprintf(payloadHex + ph, sizeof(payloadHex) - ph, "%02X ", smInput[i]);
+            Logger::Log("PACKETSNIFFER", "MANUAL: SM input [%s] len=%d (decKey=%02X)", payloadHex, payloadLen, smInput[0]);
+            
+            // SM-encrypt o payload (com decKey)
             uint8_t smOutput[64];
-            int smLen = SimpleModulusCipher::Encrypt(smOutput, c1Payload, payloadLen);
+            int smLen = SimpleModulusCipher::Encrypt(smOutput, smInput, payloadLen);
             if (smLen <= 0) {
                 Logger::Log("PACKETSNIFFER", "MANUAL: SM encrypt failed (smLen=%d)", smLen);
                 continue;
@@ -1504,6 +1528,40 @@ static void ProcessSkillQueue() {
             for (int i = 0; i < smLen && sh + 3 < (int)sizeof(smHex); i++)
                 sh += snprintf(smHex + sh, sizeof(smHex) - sh, "%02X ", smOutput[i]);
             Logger::Log("PACKETSNIFFER", "MANUAL: SM encrypted [%s] len=%d", smHex, smLen);
+
+            // DIAGNOSTIC: compare our Encrypt vs game's NativeEncrypt on same plaintext
+            {
+                uint8_t nativeOut[64];
+                int nativeLen = SimpleModulusCipher::NativeEncrypt(nativeOut, smInput, payloadLen);
+                if (nativeLen > 0) {
+                    char nHex[128]; int nh = 0;
+                    for (int i = 0; i < nativeLen && nh + 3 < (int)sizeof(nHex); i++)
+                        nh += snprintf(nHex + nh, sizeof(nHex) - nh, "%02X ", nativeOut[i]);
+                    bool match = (nativeLen == smLen) && (memcmp(smOutput, nativeOut, smLen) == 0);
+                    Logger::Log("PACKETSNIFFER", "MANUAL DIAG: NativeEncrypt [%s] len=%d MATCH=%s",
+                                nHex, nativeLen, match ? "YES" : "NO");
+                    // Decrypt native result to see full 8-byte block (incl. padding/nonce)
+                    uint8_t nativeDec[8] = {0};
+                    int ndLen = SimpleModulusCipher::Decrypt(nativeDec, nativeOut, nativeLen);
+                    if (ndLen > 0) {
+                        char dHex[32]; int dh = 0;
+                        for (int i = 0; i < 8 && dh + 3 < (int)sizeof(dHex); i++)
+                            dh += snprintf(dHex + dh, sizeof(dHex) - dh, "%02X ", nativeDec[i]);
+                        Logger::Log("PACKETSNIFFER", "MANUAL DIAG: native decrypted 8B [%s] valid=%d", dHex, ndLen);
+                    }
+                    // Also decrypt OUR result to compare padding
+                    uint8_t ourDec[8] = {0};
+                    int odLen = SimpleModulusCipher::Decrypt(ourDec, smOutput, smLen);
+                    if (odLen > 0) {
+                        char oHex[32]; int oh = 0;
+                        for (int i = 0; i < 8 && oh + 3 < (int)sizeof(oHex); i++)
+                            oh += snprintf(oHex + oh, sizeof(oHex) - oh, "%02X ", ourDec[i]);
+                        Logger::Log("PACKETSNIFFER", "MANUAL DIAG: our decrypted 8B [%s] valid=%d", oHex, odLen);
+                    }
+                } else {
+                    Logger::Log("PACKETSNIFFER", "MANUAL DIAG: NativeEncrypt FAILED (len=%d)", nativeLen);
+                }
+            }
 
             // Montar C3: C3 [total_size] [SM data]
             int c3TotalSize = 2 + smLen;  // C3 header (2 bytes) + SM data

@@ -7,6 +7,14 @@
     "User communicates in Portuguese",
     "Project is a BlackrockMU private server client at F:\\blackrockmu",
     "PS (PS.dll) no longer exists in the project — related docs can be deleted",
-    "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)"
+    "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)",
+    "byp.dll is NOT injected via CreateRemoteThread; opengl32.dll's DllMain calls LoadLibraryA(\"byp.dll\")",
+    "Both manual and auto-attack use skill Force (id 60 = 0x3C) from the DL",
+    "The decKey byte in C3 packets must be read from the game's MAIN_PACKET_SERIAL at address 0x08793700, not from a static counter",
+    "The SM cipher (SimpleModulusCipher) is stateless — dwPrev=0 and ring[] are local per call in EncryptBlock",
+    "Only F3 11 (character's actual skill list) should populate the MuProxy combo box; F3 E2 (skill cast events from viewport entities) must NOT call MergeSkillCombo",
+    "Build MuProxy2 using MuProxy2.csproj (not WinFormsMitm.csproj which has a stale StartupObject)",
+    "During x32dbg RE sessions, write a SMALL separate doc per step (byp/docs/<topic>/NN_step.md) IMMEDIATELY after each analysis step — never accumulate findings across many steps before documenting. One step at a time: analyze → write doc → next step.",
+    "C1 07 19 skill packet: the 'skill wire 0xE7C3' was a misread. Send fn 0x404DB0 overwrites data[3] with serial from 0x08793700. Plaintext layout is [C1][07][19][serial][skill_low][target_high][target_low]."
   ]
 }

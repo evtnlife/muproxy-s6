@@ -22,6 +22,7 @@ public:
 private:
     static uint32_t m_keys[SM_KEY_COUNT * 4]; // Modulus, EncKey, DecKey, XORKey
     static bool m_initialized;
+    static uint32_t m_dwPrevState;  // persistent chaining state (carries across encryptions, matches game)
     
     static void EncryptBlock(void* dest, const void* source, int size);
     static int DecryptBlock(void* dest, const void* source);  // returns valid byte count (1-8) or -1 on checksum failure
