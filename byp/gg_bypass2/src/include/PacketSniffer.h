@@ -3,13 +3,6 @@
 
 namespace PacketSniffer {
 
-// Skill packet types
-enum SkillPacketType {
-    SKILL_TYPE_STRUCT = 0,    // Direct struct: [word size][C1 xx F1 data...]
-    SKILL_TYPE_BUILDER = 1,   // Use game builder functions (0x404B40 etc.)
-    SKILL_TYPE_MANUAL = 2     // Manual: form C1 payload → SM encrypt → C3 → Layer-1 → send
-};
-
 bool Install();
 void InstallHooksForAllModules();
 void Uninstall();
@@ -32,15 +25,5 @@ bool InjectC1Attack(const uint8_t* plaintext, int len);
 //   XorData[3,7) -> SM input [serial 0x08793700 + payload] -> SimpleModulus
 //   (6 -> 11 bytes) -> C3 0D [11] -> Layer-1 -> wire
 bool InjectSkillC1(const uint8_t* plaintext, int len);
-
-// Fila thread-safe para skill attacks (C3).
-// AttackModule enfileira o plaintext; HookSend processa na thread do jogo
-// chamando SimpleModulus::Encrypt (0x998420) no contexto seguro.
-// skillId: skill number (ex: 0x14 = Twisting Slash)
-// attackId: RAW entity index (sem XOR 0xEFF5!) — o servidor MuEmu lê
-//   bIndex = MAKE_NUMBERW(indexH, indexL) e OBJECT_RANGE(bIndex) requer < MAX_OBJECTS.
-//   XOR 0xEFF5 é APENAS para ataques normais (opcode 0x11).
-bool EnqueueSkillPacket(const uint8_t* plaintext, int len, SkillPacketType type = SKILL_TYPE_STRUCT,
-                       uint16_t skillId = 0, uint16_t attackId = 0);
 
 } // namespace PacketSniffer

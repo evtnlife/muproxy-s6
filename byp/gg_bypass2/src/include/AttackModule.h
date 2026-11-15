@@ -13,7 +13,9 @@
 //   CMD ATTACK START <targetIndex> [delay=<ms>] [range=<float>] [skill=<hex>] [type=<0|1>]
 //     → Inicia ataque contínuo no alvo.
 //       targetIndex  = entity index (OFF_INDEX 0x07E) do alvo
-//       O AttackTargetID é calculado internamente como: EntityIndex XOR 0xEFF5       (usado tanto em ataques normais 0x11 quanto skill attacks 0x19)//       delay        = intervalo entre ataques em ms (padrão: 800)
+//       O AttackTargetID (apenas ataque normal 0x11) = EntityIndex XOR 0xEFF5.
+//       O skill (0x19) usa o entity index PURO, sem XOR.
+//       delay        = intervalo entre ataques em ms (padrão: 800)
 //       range        = distância máxima para atacar (padrão: 0 = sem limite)
 //       skill        = ID da skill para ataque mágico (hex, ex: skill=1E)
 //       type         = 0=normal, 1=skill (padrão: 0; se skill= definido, vira 1)
@@ -27,11 +29,13 @@
 //   CMD ATTACK CONFIG delay=<ms> range=<float>
 //     → Altera configurações padrão do módulo
 //
-// Formatos de pacote:
+// Formatos de pacote (plaintext, antes da cifra):
 //   Ataque normal:  C1 07 11 <targetHi> <targetLo> <action> <dir>
-//   Ataque skill:   C1 07 19 <skill> <targetHi> <targetLo> <dir> (plaintext)
-//                   → cifrado via main.exe+0x404D70 → C3 0D E5 <10 bytes>
-//   AttackTargetID = EntityIndex XOR 0xEFF5 (big-endian no pacote) — ataques normais E skill
+//                   → XorData[3,7) + Layer-1 → wire C1 puro
+//   Ataque skill:   C1 07 19 <skillHi> <skillLo> <indexHi> <indexLo>
+//                   → XorData[3,7) → SM [serial+payload] → C3 0D [11] → Layer-1 → wire
+//   AttackTargetID = EntityIndex XOR 0xEFF5 — SOMENTE ataque normal (0x11).
+//                   O skill (0x19) usa o entity index PURO (sem XOR).
 // ============================================================================
 
 namespace AttackModule {
