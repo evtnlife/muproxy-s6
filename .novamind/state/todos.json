@@ -1,18 +1,18 @@
 [
   {
-    "content": "Rewrite root .gitignore to track only .novamind/skills/",
-    "status": "completed"
+    "content": "Rename folder psdisabled → byp on disk and re-point root-repo gitlinks (MuProxy2, gg_bypass2)",
+    "status": "in_progress"
   },
   {
-    "content": "git init at F:\\blackrockmu",
-    "status": "completed"
+    "content": "Remove PS lines from skill refs (01-architecture.md:46-47, 10-references.md:29)",
+    "status": "pending"
   },
   {
-    "content": "git add + verify only skill files are staged",
-    "status": "completed"
+    "content": "Update path references: byp/README.md, references/10-references.md prefix, .novamind/memory.md",
+    "status": "pending"
   },
   {
-    "content": "Commit the skill files",
-    "status": "completed"
+    "content": "Verify: git status clean, no stale 'psdisabled' refs in skill, build.bat intact",
+    "status": "pending"
   }
 ]

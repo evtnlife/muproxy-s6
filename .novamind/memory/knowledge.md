@@ -1,44 +1,5 @@
 # NovaMind Consolidated Knowledge
 
-## Knowledge Consolidation - 2026-11-14T04:09:39.353Z
-
-## Summary
-
-**Original task:** Fix the skill map parser in the BlackRock MU proxy (byp.dll) so that server-sent skill list packets are correctly parsed, and improve the GUI skill combo box to show skill names instead of hex IDs.
-
-**Files read/modified:**
-- `f:\blackrockmu\psdisabled\gg_bypass2\src\SkillMap.cpp` — **Modified**: F3 11 parser fixed (entryStart off-by-one: `hdrSize+3` → `hdrSize+4` to skip ListType byte; added listType as remove tiebreaker; corrected comment that BlackRock doesn't send F3 11). Built and deployed successfully.
-- `f:\blackrockmu\psdisabled\gg_bypass2\src\include\SkillMap.h` — Read: confirmed `UnregisterSkill` exists.
-- `f:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp` — Searched: uses `SkillMap::GetSkillIndex(skillId)` with low-byte fallback for C1 19 (TargetedSkill075) packets.
-- `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\MainForm.cs` — Read (lines 220-330, 420-500): combo box populated by `OnSkillListReceived` which parses F3 E2 (24-byte entries: skillId LE at off+0, level at off+20) and F3 11 (4-byte fallback). **Critical bug found**: `minLen=102` for F3 E2 means only packets with ≥4 skills are processed, but actual F3 E2 packets are 30-78 bytes (1-3 skills).
-- `F:\blackrockmu\byp_packets.log` — Searched extensively: found 11 F3 11 packets (all `C1 0A F3 11 [FE|FF] 00 08 13 00 00`), 2033 F3 E2 lines, F3 E5 packets (map name "Noble Castle"), and F3 E2 with count=3 giving skillIds 0x0332(Lv36), 0x02BA(Lv24), 0x02CA(Lv24).
-
-**Key decisions/architecture:**
-- F3 11 structure (confirmed by OpenMU docs + capture): `[4]=Count(0xFE/0xFF) [5]=ListType [6+]=SkillEntry[] (4B: SkillIndex(1), SkillNumber(2 LE), SkillLevel(1))`
-- F3 E2 structure (confirmed by capture): 24-byte entries with skillId(2 LE) at off+0, flags at off+2-3, 4 floats (position) at off+4-19, level(1) at off+20
-- F3 E2 is likely a "skill cast with position" packet (contains coordinate floats), not a pure skill list — but still provides valid skillNumber→low-byte mappings
-- The skill map's purpose: skillNumber → skillIndex conversion for C1 19 packets (fallback: low byte of skillNumber)
-
-**Errors encountered:**
-- F3 11 parser off-by-one: `entryStart = hdrSize+3` pointed to ListType (data[5]=0x00) instead of first entry (data[6]=0x08). Caused SkillNumber to be read as 0x1308 instead of 0x0013. **Fixed** by changing to `hdrSize+4`.
-- A previous (pre-compaction) edit had incorrectly changed the parser to a "3-byte BigEndian variant" — the actual current file state (verified by re-reading) still had the original 4-byte LE parser with the off-by-one bug. The correct fix is simply the entryStart offset.
-- GUI minLen=102 for F3 E2 is too high (actual packets are 30-78 bytes for 1-3 skills), so the combo box may not be populated by the correct packets.
-
-**Current state:**
-- ✅ F3 11 parser fixed, built, deployed (`F:\blackrockmu\byp.dll` at 19:43:44)
-- ✅ F3 E2 parser confirmed correct (skillId LE off+0, level off+20)
-- 🔲 **User reported**: combo box shows 0x0333/0x0335/0x0358 (all Lv36) but user only has 2 skills — values don't match any F3 E2 found in capture
-- 🔲 **User wants**: skill NAMES displayed in combo box, not hex IDs
-- 🔲 **Pending**: Fix minLen in MainForm.cs (102→30), add skill ID→name mapping, investigate why combo shows wrong values (possibly a different/larger F3 E2 packet, or stale data)
-- 🔲 **Pending**: Rebuild GUI (MuProxy2) after changes
-
-**Next steps:**
-1. Lower `minLen` for F3 E2 in `MainForm.cs` line 484 from 102 to 30
-2. Add a skill ID → name dictionary (MU skill table) and display names in the combo box
-3. Investigate the source of 0x0333/0x0335/0x0358 values (search capture for F3 E2 with these exact skillIds)
-4. Rebuild MuProxy2 and test
----
-
 ## Knowledge Consolidation - 2026-11-14T04:38:22.352Z
 
 Vou ler o Protocol.cpp para entender como o servidor envia a skill list:
@@ -92,10 +53,10 @@ Entry (4B each): [slot: 1B] [skill: 2B LE] [level_encoded: 1B]
 | `F:\MuEmu-master\eMU\eMU\GameServer\GameServer\Protocol.cpp` | Read (lines 1-50) — initial exploration |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\SkillManager.h` | Read (lines 350-385, 55-160) — PMSG_SKILL_LIST struct + skill constants |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\Protocol.h` | Read (lines 1100-1160) — F3 E2 definition |
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\MainForm.cs` | **Modified** (level decode fix) + Read (lines 251-266, 266-340, 370-395, 460-530) |
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\Services\DllCommandService.cs` | Read (lines 50-110) — packet dispatch |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\MainForm.cs` | **Modified** (level decode fix) + Read (lines 251-266, 266-340, 370-395, 460-530) |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\Services\DllCommandService.cs` | Read (lines 50-110) — packet dispatch |
 | `OpenMU-master/docs/Packets/C1-F3-11-SkillListUpdate_by-server.md` | Read — OpenMU reference (4-byte format) |
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\hook_packets_20261113_185644.csv` | Read — real packet captures |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\hook_packets_20261113_185644.csv` | Read — real packet captures |
 | `F:\blackrockmu\MuEmu-master\Client_EX603\Client\` | Listed — client source is nearly empty (only 6 cpp files) |
 
 ### Key Decisions
@@ -118,7 +79,7 @@ Entry (4B each): [slot: 1B] [skill: 2B LE] [level_encoded: 1B]
 
 ### User's Durable Context
 - Full eMU source (server + client) is at `F:\blackrockmu\MuEmu-master`
-- MuProxy2 project is at `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\`
+- MuProxy2 project is at `f:\blackrockmu\byp\MuProxy2\MuProxy2\`
 - The user communicates in Portuguese (Brazil)
 - Test character has SKILL_FORCE = 60
 ---
@@ -157,18 +118,18 @@ C1 07 19 [skill 1B] [targetH 1B] [targetL 1B] [dir 1B]  (7 bytes plaintext)
 
 | File | Action |
 |------|--------|
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\MainForm.cs` | **Modified** — populated `SkillNames` dictionary with ~100 eMU skill constants (lines 230–257). Also contains F3 11 parser (line 266+) and F3 E2 parser (incorrectly treats health bar as skill casts) |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\MainForm.cs` | **Modified** — populated `SkillNames` dictionary with ~100 eMU skill constants (lines 230–257). Also contains F3 11 parser (line 266+) and F3 E2 parser (incorrectly treats health bar as skill casts) |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\SkillManager.h` | Read — skill constants (lines 30–155), PMSG_SKILL_LIST (line 350+), PMSG_SKILL_ATTACK_RECV (lines 193–207), SKILL_INFO struct (line 382+) |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\SkillManager.cpp` | Read — GCSkillListSend (lines 6357–6398) confirming format |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\Skill.cpp` | Read — CSkill::Set (lines 53–80), m_level set directly |
 | `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\Protocol.h` | Read — F3 E2 = PMSG_NEW_HEALTH_BAR_SEND (line 1122) |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp` | Read — SendSkillAttack builds 7-byte C1 packet, uses SkillMap::GetSkillIndex for 1-byte skill |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\SkillMap.cpp` | Read — bidirectional map skillNumber↔skillIndex, fallback to low byte |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\PacketSniffer.cpp` | Read — EnqueueSkillPacket (line 1191), MANUAL path (line 1453): SM-encrypts 5-byte payload → C3 0D [11B]; BUILDER path (line 1380): uses game's native fnEncrypt |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\SimpleModulusCipher.cpp` | Read — `Encrypt` (reimplementation, lines 1–300+) and `NativeEncrypt` (calls game's 0x998420). Initialize tests roundtrip (our Enc→our Dec) and NativeEnc→ourDec, but NOT ourEnc→NativeDec |
+| `F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp` | Read — SendSkillAttack builds 7-byte C1 packet, uses SkillMap::GetSkillIndex for 1-byte skill |
+| `F:\blackrockmu\byp\gg_bypass2\src\SkillMap.cpp` | Read — bidirectional map skillNumber↔skillIndex, fallback to low byte |
+| `F:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` | Read — EnqueueSkillPacket (line 1191), MANUAL path (line 1453): SM-encrypts 5-byte payload → C3 0D [11B]; BUILDER path (line 1380): uses game's native fnEncrypt |
+| `F:\blackrockmu\byp\gg_bypass2\src\SimpleModulusCipher.cpp` | Read — `Encrypt` (reimplementation, lines 1–300+) and `NativeEncrypt` (calls game's 0x998420). Initialize tests roundtrip (our Enc→our Dec) and NativeEnc→ourDec, but NOT ourEnc→NativeDec |
 | `F:\blackrockmu\byp_packets.log` | Read — native game captures; line 39: `C3-0D-63-11-4D-59-16-81-50-66-98-70-4A` (real skill attack, 13 bytes) |
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\hook_packets_20261113_204716.csv` | Read — real F3 11 and F3 E2 captures |
-| `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\muproxy2_20261113_204716.log` | Read — proxy logs showing F3 11 (8 skills) and F3 E2 (1 "cast") |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\hook_packets_20261113_204716.csv` | Read — real F3 11 and F3 E2 captures |
+| `f:\blackrockmu\byp\MuProxy2\MuProxy2\bin\Debug\net8.0-windows\logs\muproxy2_20261113_204716.log` | Read — proxy logs showing F3 11 (8 skills) and F3 E2 (1 "cast") |
 | `F:\blackrockmu\gg_bypass2.log` | Read — SMOD roundtrip tests all pass (our Enc→our Dec), checksums match |
 
 ### Key Decisions
@@ -190,8 +151,8 @@ C1 07 19 [skill 1B] [targetH 1B] [targetL 1B] [dir 1B]  (7 bytes plaintext)
 
 ### User's Durable Context
 - Full eMU source at `F:\blackrockmu\MuEmu-master`
-- MuProxy2 project at `f:\blackrockmu\psdisabled\MuProxy2\MuProxy2\`
-- byp.dll source at `F:\blackrockmu\psdisabled\gg_bypass2\src\`
+- MuProxy2 project at `f:\blackrockmu\byp\MuProxy2\MuProxy2\`
+- byp.dll source at `F:\blackrockmu\byp\gg_bypass2\src\`
 - User communicates in Portuguese (Brazil)
 - Test character is a Mage with skills: Force(60), Fire Blast(74), Stern(67), Remove Stern(68), Greater Mana(69), Invisibility(70), Remove Invisibility(71), Remove All Effect(72)
 - Native packet log: `F:\blackrockmu\byp_packets.log`
@@ -368,9 +329,9 @@ Build OK, byp.dll deployado em `F:\blackrockmu\`.
 
 | Arquivo | Mudança |
 |---------|---------|
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\Logger.h` | Declarou `LogPacketDual(tag, dir, raw, rawLen, dec, decLen)` |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\Logger.cpp` | Implementou `LogPacketDual` — escreve `hex=<raw> dec=<decrypted>` na mesma linha |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\PacketSniffer.cpp` | `LogRaw` agora chama `LogPacketDual` pra pacotes do GS (raw + decifrado), e `LogPacket` pra sockets não-GS (só raw) |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\Logger.h` | Declarou `LogPacketDual(tag, dir, raw, rawLen, dec, decLen)` |
+| `f:\blackrockmu\byp\gg_bypass2\src\Logger.cpp` | Implementou `LogPacketDual` — escreve `hex=<raw> dec=<decrypted>` na mesma linha |
+| `f:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` | `LogRaw` agora chama `LogPacketDual` pra pacotes do GS (raw + decifrado), e `LogPacket` pra sockets não-GS (só raw) |
 
 **Formato novo no log (GS):**
 ```
@@ -395,18 +356,18 @@ The user is reverse-engineering a Mu Online game client (BlackRockMU) via a DLL 
 ### Files Modified (previous turns, already deployed)
 | File | Change |
 |------|--------|
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\Logger.h` | Declared `LogPacketDual(tag, dir, raw, rawLen, dec, decLen)` |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\Logger.cpp` | Implemented `LogPacketDual` — writes `hex=<raw> dec=<decrypted>` on one line |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\PacketSniffer.cpp` | `LogRaw` calls `LogPacketDual` for GS packets (raw+dec), `LogPacket` for non-GS (raw only) |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\Logger.h` | Declared `LogPacketDual(tag, dir, raw, rawLen, dec, decLen)` |
+| `f:\blackrockmu\byp\gg_bypass2\src\Logger.cpp` | Implemented `LogPacketDual` — writes `hex=<raw> dec=<decrypted>` on one line |
+| `f:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` | `LogRaw` calls `LogPacketDual` for GS packets (raw+dec), `LogPacket` for non-GS (raw only) |
 
 ### Files Read (this session)
 | File | Purpose |
 |------|---------|
-| `f:\blackrockmu\psdisabled\gg_bypass2\build.bat` | Confirmed build script (VS 18 x86, kills main.exe) |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\MuOpcodes.h` | Opcode definitions (C1/C2/C3 headers, TARGETED_SKILL=0x19, etc.) |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\SkillMap.h` | SkillNumber→SkillIndex map; notes real packet `C1 07 19 E7 EE CF 12`, skill byte=0xE7 |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\AttackModule.h` | Attack/skill packet builder; documents `C1 07 19 <skill> <targetHi> <targetLo> <dir>`, target=EntityIndex XOR 0xEFF5 (big-endian) |
-| `f:\blackrockmu\psdisabled\gg_bypass2\src\include\SkillHook.h` | Minimal: `Install()`/`Uninstall()` in namespace SkillHook |
+| `f:\blackrockmu\byp\gg_bypass2\build.bat` | Confirmed build script (VS 18 x86, kills main.exe) |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\MuOpcodes.h` | Opcode definitions (C1/C2/C3 headers, TARGETED_SKILL=0x19, etc.) |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\SkillMap.h` | SkillNumber→SkillIndex map; notes real packet `C1 07 19 E7 EE CF 12`, skill byte=0xE7 |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\AttackModule.h` | Attack/skill packet builder; documents `C1 07 19 <skill> <targetHi> <targetLo> <dir>`, target=EntityIndex XOR 0xEFF5 (big-endian) |
+| `f:\blackrockmu\byp\gg_bypass2\src\include\SkillHook.h` | Minimal: `Install()`/`Uninstall()` in namespace SkillHook |
 
 ### Key Log Analysis (force skill)
 The force skill decrypted payload is **`C1 07 19 E7 C3 E2 CF`** (7 bytes):
@@ -465,7 +426,7 @@ Error: [NovaMind coaching] Not run: `get-content` is covered by the `read_file` 
 
 This caused the server (GAMESERVER_UPDATE 803) to misread all fields, resulting in an invalid skill ID → DC.
 
-**Fix Applied to `F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp`:**
+**Fix Applied to `F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp`:**
 1. Removed `SkillMap::GetSkillIndex()` — now uses full 2-byte `skillId` directly
 2. Byte order corrected to `[skillH][skillL][targetH][targetL]`, direction byte removed
 3. `EnqueueSkillPacket` call updated to pass `skillId` (uint16_t) instead of `skillByte` (uint8_t)
@@ -474,8 +435,8 @@ This caused the server (GAMESERVER_UPDATE 803) to misread all fields, resulting 
 **Build:** ✅ `byp.dll` compiled successfully (only pre-existing deprecated API warnings).
 
 **Files read:**
-- `F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp` — main file, read lines 180-300 and 200-285, **modified** (3 edits)
-- `F:\blackrockmu\psdisabled\gg_bypass2\src\PacketSniffer.cpp` — read lines 1210-1280 (x64dbg trace showing exact game byte order) and EnqueueSkillPacket section
+- `F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp` — main file, read lines 180-300 and 200-285, **modified** (3 edits)
+- `F:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` — read lines 1210-1280 (x64dbg trace showing exact game byte order) and EnqueueSkillPacket section
 - `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\SkillManager.h` — read lines 193-220 (PMSG_SKILL_ATTACK_RECV struct)
 - `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\SkillManager.cpp` — read lines 5746-5830 (CGSkillAttackRecv handler)
 - `F:\blackrockmu\MuEmu-master\eMU\GameServer\GameServer\Protocol.h` — read lines 60-95 (PBMSG_HEAD struct)
@@ -543,7 +504,7 @@ Nossa DLL está enviando `[skillH][skillL][indexH][indexL]` — completamente er
 Vou corrigir o `AttackModule.cpp`:
 
 TOOL: [Tool: read_file]
-File: F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp
+File: F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp
 Total Lines: 1164 | Size: 49.9KB
 Showing: lines 256–280 of 1164
 
@@ -572,7 +533,7 @@ Showing: lines 256–280 of 1164
 Agora vou aplicar a correção — trocar o byte order para intercalado `[indexH][skillH][indexL][skillL]`:
 
 TOOL: [Tool: edit_file]
-File: F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp
+File: F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp
 Lines 256-266 replaced with:
     // Game format (confirmed via server struct PMSG_SKILL_ATTACK_RECV, GAMESERVER_UPDATE>=701):
     //   C1 07 19 [indexH] [skillH] [indexL] [skillL]
@@ -588,7 +549,7 @@ Lines 256-266 replaced with:
     smInput[6] = (uint8_t)(skillId & 0xFF);                    // skillL
 
 TOOL: [Tool: edit_file]
-File: F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp
+File: F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp
 Lines 269-272 replaced with:
     char plainBuf[64];
     snprintf(plainBuf, sizeof(plainBuf),
@@ -600,9 +561,9 @@ Lines 269-272 replaced with:
 Agora vou rebuildar:
 
 TOOL: [Tool: run_command]
-Command: cd /d F:\blackrockmu\psdisabled\gg_bypass2 && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe" gg_bypass2.sln /p:Configuration=Release /p:Platform=Win32 /v:minimal /nologo
+Command: cd /d F:\blackrockmu\byp\gg_bypass2 && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe" gg_bypass2.sln /p:Configuration=Release /p:Platform=Win32 /v:minimal /nologo
 Output:
-  gg_bypass2.vcxproj -> F:\blackrockmu\psdisabled\gg_bypass2\Release\byp.dll
+  gg_bypass2.vcxproj -> F:\blackrockmu\byp\gg_bypass2\Release\byp.dll
   (only pre-existing deprecated API warnings)
 
 Build OK. Agora o pacote que a DLL vai enviar para skill=0x003C e target=0xED10 será:
@@ -655,19 +616,19 @@ Vou buscar no log todos os pacotes `C1 07 19` para encontrar o que o jogo mandou
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `psdisabled\instructions.md` | 212 | Main architecture & rules doc |
-| `psdisabled\.github\instructions\instruction.instructions.md` | 212 | **IDENTICAL** to instructions.md (redundancy) |
-| `psdisabled\README.md` | 51 | General structure + build (overlaps instructions.md §8) |
-| `psdisabled\MuProxy2\README.md` | 39 | **OUTDATED** — describes named pipe + CreateRemoteThread (contradicts current TCP + DllMain architecture) |
+| `byp\instructions.md` | 212 | Main architecture & rules doc |
+| `byp\.github\instructions\instruction.instructions.md` | 212 | **IDENTICAL** to instructions.md (redundancy) |
+| `byp\README.md` | 51 | General structure + build (overlaps instructions.md §8) |
+| `byp\MuProxy2\README.md` | 39 | **OUTDATED** — describes named pipe + CreateRemoteThread (contradicts current TCP + DllMain architecture) |
 | `attack_packet_re.md` | 264 | RE report, VALIDATED. In root, should be in docs/ |
-| `psdisabled\gg_bypass2\opengl\README_GLProxy.md` | 47 | Third-party GLProxy template |
-| `psdisabled\docs\crypto.md` | 116 | Crypto of 55902 (SimpleModulus) |
-| `psdisabled\docs\ATTACK_PACKET_ANALYSIS.md` | 282 | Attack packet analysis (Portuguese) |
-| `psdisabled\docs\PS_Consolidado.md` | 669 | PS.dll consolidated doc — **user says PS can be deleted** |
-| `psdisabled\docs\resumo_problema_ataque.md` | 223 | Attack problem summary |
-| `psdisabled\docs\PS_Object_Array.md` | 181 | Object array & monster list (PS-related) |
-| `psdisabled\docs\skill_trace_2026_08_10.md` | 394 | Skill attack flow trace |
-| `psdisabled\docs\plan-debugC3Decryption.prompt.md` | 94 | Debug plan for C3 decryption |
+| `byp\gg_bypass2\opengl\README_GLProxy.md` | 47 | Third-party GLProxy template |
+| `byp\docs\crypto.md` | 116 | Crypto of 55902 (SimpleModulus) |
+| `byp\docs\ATTACK_PACKET_ANALYSIS.md` | 282 | Attack packet analysis (Portuguese) |
+| `byp\docs\PS_Consolidado.md` | 669 | PS.dll consolidated doc — **user says PS can be deleted** |
+| `byp\docs\resumo_problema_ataque.md` | 223 | Attack problem summary |
+| `byp\docs\PS_Object_Array.md` | 181 | Object array & monster list (PS-related) |
+| `byp\docs\skill_trace_2026_08_10.md` | 394 | Skill attack flow trace |
+| `byp\docs\plan-debugC3Decryption.prompt.md` | 94 | Debug plan for C3 decryption |
 | `.novamind\memory.md` | 10 | NovaMind project-scope memory |
 | `.novamind\memory\knowledge.md` | 960 | NovaMind consolidated knowledge log (53.8KB) |
 | `.novamind\memory\session-log.md` | — | Exists, not yet read |
@@ -713,11 +674,11 @@ Tudo concluído. Resumo final do que foi feito:
 | Ação | Arquivo |
 |------|---------|
 | **Criada** (skill consolidada) | `F:\blackrockmu\.novamind\skills\blackrockmu\SKILL.md` (278 linhas, 13.1 KB) |
-| **Apagado** (duplicate idêntico) | `F:\blackrockmu\psdisabled\.github\instructions\instruction.instructions.md` |
-| **Movido** para `docs/` | `F:\blackrockmu\attack_packet_re.md` → `F:\blackrockmu\psdisabled\docs\attack_packet_re.md` |
-| **Reescrito** (arquitetura atual) | `F:\blackrockmu\psdisabled\MuProxy2\README.md` |
-| **Afinado** (aponta p/ skill) | `F:\blackrockmu\psdisabled\instructions.md` |
-| **Atualizado** (remove framing PS) | `F:\blackrockmu\psdisabled\README.md` |
+| **Apagado** (duplicate idêntico) | `F:\blackrockmu\byp\.github\instructions\instruction.instructions.md` |
+| **Movido** para `docs/` | `F:\blackrockmu\attack_packet_re.md` → `F:\blackrockmu\byp\docs\attack_packet_re.md` |
+| **Reescrito** (arquitetura atual) | `F:\blackrockmu\byp\MuProxy2\README.md` |
+| **Afinado** (aponta p/ skill) | `F:\blackrockmu\byp\instructions.md` |
+| **Atualizado** (remove framing PS) | `F:\blackrockmu\byp\README.md` |
 | **Memória adicionada** | `.novamind/memory.md` — skill como fonte + versão ex603 |
 
 ## ✅ Tarefa 2 — Skill-creator (5 fases)
@@ -750,7 +711,7 @@ Tudo concluído. Resumo final do que foi feito:
 12. Open questions
 ```
 
-O contexto auto-carregado (`instructions.md`) agora tem ~2.3 KB (era 8.4 KB) e aponta para a skill. Os docs detalhados permanecem em `psdisabled/docs/` como referência, fora do contexto.
+O contexto auto-carregado (`instructions.md`) agora tem ~2.3 KB (era 8.4 KB) e aponta para a skill. Os docs detalhados permanecem em `byp/docs/` como referência, fora do contexto.
 ---
 
 ## Knowledge Consolidation - 2026-11-14T21:50:36.339Z
@@ -767,9 +728,9 @@ The user has two goals for this turn:
 | File | Status |
 |------|--------|
 | `F:\blackrockmu\.novamind\skills\blackrockmu\SKILL.md` | Read in full (278 lines, 13.1 KB) — 12 sections (1–12, 9b, 10b) |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\` | Directory listed — 24 items (23 .cpp/.def + `include/` subfolder) |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\PacketSniffer.cpp` | Read in full across 5 chunks (1634 lines, 66.8 KB) |
-| `F:\blackrockmu\psdisabled\gg_bypass2\src\AttackModule.cpp` | Read lines 1–300 of 1165 (49.9 KB) — **incomplete** |
+| `F:\blackrockmu\byp\gg_bypass2\src\` | Directory listed — 24 items (23 .cpp/.def + `include/` subfolder) |
+| `F:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` | Read in full across 5 chunks (1634 lines, 66.8 KB) |
+| `F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp` | Read lines 1–300 of 1165 (49.9 KB) — **incomplete** |
 
 ### Key Knowledge Extracted from Code Comments (PacketSniffer.cpp)
 - **C116 GS port detection** — how the DLL identifies the game-server port.
@@ -800,8 +761,8 @@ The user has two goals for this turn:
 ### Prior Context (Carried Forward)
 - The skill was created/consolidated in a prior session: `F:\blackrockmu\.novamind\skills\blackrockmu\SKILL.md` (278 lines).
 - 3 eval test prompts exist in `F:\blackrockmu\.novamind\skills\blackrockmu\evals\` (`add-new-message-tag/`, `debug-corrupted-attack-packets/`, `rebuild-after-offset-change/`).
-- Project docs live in `F:\blackrockmu\psdisabled\docs\` (including `attack_packet_re.md`).
-- The auto-loaded context file is `F:\blackrockmu\psdisabled\instructions.md` (~2.3 KB, points to the skill).
+- Project docs live in `F:\blackrockmu\byp\docs\` (including `attack_packet_re.md`).
+- The auto-loaded context file is `F:\blackrockmu\byp\instructions.md` (~2.3 KB, points to the skill).
 - Emulator: MuEmu-master, client version ex603.
 - Memory file: `.novamind/memory.md` records the skill as source of truth.
 ---
@@ -812,20 +773,75 @@ Let me continue reading the remaining source files:
 
 <tool>
 <tool_name>read_file</tool_name>
-<file_path>F:\blackrockmu\psdisabled\gg_bypass2\src\SkillHook.cpp</file_path>
+<file_path>F:\blackrockmu\byp\gg_bypass2\src\SkillHook.cpp</file_path>
 <start_line>301</start_line>
 <end_line>345</end_line>
 </tool>
 <tool>
 <tool_name>read_file</tool_name>
-<file_path>F:\blackrockmu\psdisabled\gg_bypass2\src\MainPatcher.cpp</file_path>
+<file_path>F:\blackrockmu\byp\gg_bypass2\src\MainPatcher.cpp</file_path>
 </tool>
 <tool>
 <tool_name>read_file</tool_name>
-<file_path>F:\blackrockmu\psdisabled\gg_bypass2\src\PsBypass.cpp</file_path>
+<file_path>F:\blackrockmu\byp\gg_bypass2\src\PsBypass.cpp</file_path>
 </tool>
 <tool>
 <tool_name>read_file</tool_name>
-<file_path>F:\blackrockmu\psdisabled\gg_bypass2\src\PsPacketHook.cpp</file_path>
+<file_path>F:\blackrockmu\byp\gg_bypass2\src\PsPacketHook.cpp</file_path>
 </tool>
+---
+
+## Knowledge Consolidation - 2026-11-14T23:37:00.690Z
+
+## Summary
+
+### Original Task
+The user (Portuguese-speaking) wanted to:
+1. **Review code comments** in the `gg_bypass2` source and enrich the `blackrockmu` skill with valuable findings.
+2. **Split the skill** into per-topic enriched MD files (one per topic), with `SKILL.md` becoming a concise index with brief descriptions + pointers.
+3. **Release the skill files to git** — make them trackable in a repository.
+
+### Files Read (source code for enrichment)
+- `F:\blackrockmu\byp\gg_bypass2\src\SkillHook.cpp` (lines 301–345)
+- `F:\blackrockmu\byp\gg_bypass2\src\MainPatcher.cpp`
+- `F:\blackrockmu\byp\gg_bypass2\src\PsBypass.cpp` (298 lines)
+- `F:\blackrockmu\byp\gg_bypass2\src\PsPacketHook.cpp` (113 lines)
+- `F:\blackrockmu\byp\gg_bypass2\src\PacketSniffer.cpp` (1634 lines; read lines 1–300, 408–495, 1610–1634)
+- `F:\blackrockmu\byp\gg_bypass2\src\AttackModule.cpp` (1165 lines; read lines 1–300, 300–420)
+- `F:\blackrockmu\byp\gg_bypass2\src\SimpleModulusCipher.cpp` (599 lines; read 1–300)
+- `F:\blackrockmu\byp\gg_bypass2\src\include\GameAddresses.h` (89 lines)
+- `F:\blackrockmu\byp\gg_bypass2\src\include\Config.h` (45 lines)
+- `F:\blackrockmu\byp\gg_bypass2\src\include\GameObject.h` (63 lines)
+- `F:\blackrockmu\byp\gg_bypass2\src\include\MuOpcodes.h` (58 lines)
+- `F:\blackrockmu\.novamind\skills\blackrockmu\SKILL.md` (original 278-line monolithic skill)
+
+### Files Created (10 reference MDs)
+All under `F:\blackrockmu\.novamind\skills\blackrockmu\references\`:
+- `01-architecture.md` — attach flow, module layout, hook chain
+- `02-channels.md` — communication channels (DLL notify, packet sniffer, etc.)
+- `03-crypto.md` — C1 (XOR+modulus) and C3 (SimpleModulusCipher) encryption details
+- `04-attack-packet.md` — 0xE5 skill attack, 0x19 targeted skill, packet builders
+- `05-object-array.md` — GameObject offsets, object array traversal
+- `06-message-protocol.md` — message protocol, opcodes, packet structure
+- `07-build-deploy.md` — build steps, deployment, DLL injection
+- `08-config.md` — feature flags, Config.h settings
+- `09-golden-rules-debug.md` — debugging tips, golden rules, common pitfalls
+- `10-references.md` — packet references, key file index, cross-references
+
+### Files Modified
+- `F:\blackrockmu\.novamind\skills\blackrockmu\SKILL.md` — rewritten from 278-line monolith to a ~34-line concise index with a table pointing to the 10 reference files.
+- `F:\blackrockmu\.gitignore` — updated to ignore everything except `.novamind/skills/` (game binaries, nested repos, build artifacts all excluded).
+
+### Key Decisions
+- **Skill architecture**: SKILL.md is a lightweight index; all detail lives in `references/NN-topic.md` files.
+- **Git strategy**: User chose to create a **root git repo** at `F:\blackrockmu` tracking only `.novamind/skills/`, rather than moving files into the existing nested repos (`gg_bypass2/.git`, `MuProxy2/.git`). This preserves the agent's load path.
+- **Enrichment from code comments**: Rich Portuguese comments in PacketSniffer.cpp (crypto layers, XOR filter, trampoline stubs), AttackModule.cpp (packet builders, hex logging), SimpleModulusCipher.cpp (C3 cipher), and headers (offsets, opcodes) were distilled into the reference files.
+
+### Errors & Resolutions
+- **Stale `read_file` cache**: After `skill_manage` rewrote SKILL.md, a subsequent `read_file` returned the old 278-line content. Verified via PowerShell (`Get-Content`) that the disk file was correct (3259 bytes, 34 lines). No action needed.
+- **`git` tool failure**: Initial `git` call failed with "not a git repository" because `F:\blackrockmu` had no `.git`. Resolved by discovering two nested repos (`gg_bypass2`, `MuProxy2`), then creating a root repo per user's choice.
+
+### Current State
+- **Done**: All 10 reference files written, SKILL.md rewritten as index, root git repo initialized, 15 files committed (`73b21f2` on `master`), working tree clean.
+- **Pending / Open question**: The agent asked the user whether to create an `11-ps-bypass.md` file (covering PsBypass.cpp, PsPacketHook.cpp, MainPatcher.cpp, SkillHook.cpp — the PS-bypass / anti-cheat evasion layer). The user has not yet answered this. The user's last message ("da para enriquecer em algo as referencias…") was partially addressed by this question before the git task took priority.
 ---

@@ -1,2 +1,29 @@
 # Track ONLY the project skill; ignore everything else at the root
 # (game binaries, reference sources, and the nested gg_bypass2/MuProxy2 repos).
+*.sdf
+*.obj
+*.exp
+*.lib
+dist/
+build/
+.vs/
+.vs/*
+*.log
+*.dll
+*.exe
+*.pdb
+*/obj/*
+*/bin/*
+*/Debug/*
+*/Release/*
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.dll.recipe
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/CL.command.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/Cl.items.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/CL.read.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/CL.write.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.command.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.read.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.secondary.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.write.1.tlog
+MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/MuProxy2.Hook.lastbuildstate
+.novamind/
