@@ -1,0 +1,438 @@
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Text;
+using WinFormsMitm.Events;
+
+namespace WinFormsMitm
+{
+    public partial class MainForm : Form
+    {
+        private CancellationTokenSource _cts = new();
+        private NamedPipeServerStream? _pipe;
+        private StreamReader? _pipeReader;
+        private Task? _pipeTask;
+        private TcpListener? _hookListener;
+        private Task? _hookTask;
+        private TcpLoopbackProxy? _proxy;
+        HashSet<string> bypassed = new HashSet<string>();
+
+        const string GMO_PATH_DEFAULT = @"F:\blackrockmu\main.exe";
+        private string _exePath = GMO_PATH_DEFAULT;
+        private string _serverHost = "54.36.205.234";
+        private int _serverListPort = 44411;
+        private int _gameServerPort = 55902;
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool CreateProcess(string? appName, string? cmdLine, IntPtr procAttr, IntPtr threadAttr,
+            bool inherit, uint flags, IntPtr env, string? cwd,
+            ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+        [DllImport("kernel32.dll")] static extern uint ResumeThread(IntPtr hThread);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr addr, uint size, uint allocType, uint protect);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr addr, byte[] buf, uint size, out uint written);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetModuleHandle(string moduleName);
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
+        static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr threadAttr, uint stackSize,
+            IntPtr startAddr, IntPtr param, uint flags, out uint threadId);
+        [DllImport("kernel32.dll")]
+        static extern uint WaitForSingleObject(IntPtr hHandle, uint milliseconds);
+
+        const uint CREATE_SUSPENDED = 0x4;
+        const uint MEM_COMMIT = 0x1000;
+        const uint MEM_RESERVE = 0x2000;
+        const uint PAGE_READWRITE = 0x04;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct STARTUPINFO
+        {
+            public int cb; public string lpReserved, lpDesktop, lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2;
+            public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+
+        // Log filter checkboxes
+        private CheckBox chkHook = null!, chkRaw = null!, chkSend = null!, chkOther = null!;
+        private StreamWriter? _logFile;
+        private const int MAX_LOG_LINES = 500;
+
+        public MainForm()
+        {
+            InitializeComponent();
+            FormClosing += MainForm_FormClosing;
+            SetupLogFilters();
+            OpenLogFile();
+            StartPipeServer();
+        }
+
+        private void SetupLogFilters()
+        {
+            var panel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 28,
+                AutoSize = false,
+                WrapContents = false,
+                BackColor = System.Drawing.Color.FromArgb(240, 240, 240)
+            };
+
+            var lbl = new Label { Text = "Filtros:", AutoSize = true, Margin = new Padding(4, 6, 0, 0) };
+            panel.Controls.Add(lbl);
+
+            chkHook = MkChk("HOOK", true);
+            chkRaw = MkChk("RAW", true);
+            chkSend = MkChk("SEND", true);
+            chkOther = MkChk("Outros", true);
+
+            panel.Controls.AddRange(new Control[] { chkHook, chkRaw, chkSend, chkOther });
+            tabLogs.Controls.Add(panel);
+            panel.BringToFront();
+        }
+
+        private static CheckBox MkChk(string text, bool chk)
+            => new CheckBox { Text = text, Checked = chk, AutoSize = true, Margin = new Padding(6, 4, 0, 0) };
+
+        private void OpenLogFile()
+        {
+            try
+            {
+                var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, $"muproxy2_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+                _logFile = new StreamWriter(path, true) { AutoFlush = true };
+            }
+            catch { }
+        }
+
+        private void Log(LogEvent msg)
+        {
+            try { _logFile?.WriteLine($"[{msg.Timestamp:HH:mm:ss.fff}] {msg.Message}"); } catch { }
+
+            if (InvokeRequired) { BeginInvoke(new Action(() => Log(msg))); return; }
+            if (!ShouldShowLog(msg.Message)) return;
+
+            txtLog.AppendText($"[{msg.Timestamp:HH:mm:ss}] {msg.Message}\r\n");
+
+            if (txtLog.Lines.Length > MAX_LOG_LINES)
+            {
+                txtLog.ReadOnly = false;
+                int cutTo = txtLog.GetFirstCharIndexFromLine(txtLog.Lines.Length - MAX_LOG_LINES + 100);
+                txtLog.Select(0, cutTo);
+                txtLog.SelectedText = "";
+                txtLog.ReadOnly = true;
+                txtLog.SelectionStart = txtLog.TextLength;
+            }
+        }
+
+        private bool ShouldShowLog(string msg)
+        {
+            if (msg.Contains("[HOOK]")) return chkHook.Checked;
+            if (msg.Contains("[RAW]")) return chkRaw.Checked;
+            if (msg.Contains("[SEND]")) return chkSend.Checked;
+            return chkOther.Checked;
+        }
+
+        private void AddPacket(string dir, byte[] data)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(() => AddPacket(dir, data))); return; }
+
+            string wire = BitConverter.ToString(data);
+            if (bypassed.Contains(wire)) return;
+
+            bool canAdd = false;
+            if (cbC1.Checked && wire.StartsWith("C1")) canAdd = true;
+            if (cbC2.Checked && wire.StartsWith("C2")) canAdd = true;
+            if (cbC3.Checked && wire.StartsWith("C3")) canAdd = true;
+            if (cbC4.Checked && wire.StartsWith("C4")) canAdd = true;
+
+            if (!canAdd) return;
+
+            string decoded = wire;
+            var item = new ListViewItem(new[]
+            {
+                dir,
+                DateTime.Now.ToString("HH:mm:ss.fff"),
+                data.Length.ToString(),
+                decoded,
+                wire
+            });
+            lvPackets.Items.Add(item);
+            if (cbAutoScroll.Checked) item.EnsureVisible();
+        }
+
+        // ========= Named Pipe: le pacotes da hook.dll =========
+        private void StartPipeServer()
+        {
+            StopPipeServer();
+
+            _cts = new CancellationTokenSource();
+            _pipe = new NamedPipeServerStream("MuProxy2", PipeDirection.In, 1,
+                PipeTransmissionMode.Message, PipeOptions.Asynchronous);
+            _pipeReader = new StreamReader(_pipe, Encoding.UTF8);
+            _pipeTask = Task.Run(async () =>
+            {
+                var localCts = _cts;
+                var localPipe = _pipe;
+                var localReader = _pipeReader;
+                try
+                {
+                    await localPipe.WaitForConnectionAsync(localCts.Token);
+                    if (localCts.IsCancellationRequested) return;
+                    Log(new LogEvent(DateTime.Now, "[HOOK] Conectado via named pipe"));
+                    while (!localCts.IsCancellationRequested && localPipe.IsConnected)
+                    {
+                        string? line;
+                        try
+                        {
+                            line = await localReader.ReadLineAsync().WaitAsync(localCts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return;
+                        }
+                        if (line == null) break;
+                        if (line.StartsWith("PKT "))
+                        {
+                            var parts = line.Split(' ', 3);
+                            if (parts.Length >= 3)
+                            {
+                                var hex = parts[2].Replace(" ", "");
+                                try
+                                {
+                                    AddPacket(parts[1], Convert.FromHexString(hex));
+                                }
+                                catch { }
+                            }
+                        }
+                        else
+                        {
+                            Log(new LogEvent(DateTime.Now, $"[HOOK] {line}"));
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }
+                catch (Exception ex)
+                {
+                    if (!localCts.IsCancellationRequested)
+                        Log(new LogEvent(DateTime.Now, $"[PIPE] {ex.Message}"));
+                }
+            }, _cts.Token);
+        }
+
+        private void StopPipeServer()
+        {
+            try
+            {
+                _cts?.Cancel();
+                _pipeReader?.Dispose();
+                if (_pipe?.IsConnected == true)
+                {
+                    try { _pipe.Disconnect(); } catch { }
+                }
+                _pipe?.Dispose();
+            }
+            catch { }
+            finally
+            {
+                _cts = new CancellationTokenSource();
+            }
+
+            try
+            {
+                if (_pipeTask != null && !_pipeTask.IsCompleted)
+                {
+                    _pipeTask.Wait(500);
+                }
+            }
+            catch { }
+            _pipeTask = null;
+        }
+
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            StopPipeServer();
+            _logFile?.Dispose();
+        }
+
+        private void btnStart_Click(object? sender, EventArgs e)
+        {
+            if (_proxy?.IsRunning == true)
+            {
+                try { _proxy.Stop(); } catch (Exception ex) { Log(new LogEvent(DateTime.Now, $"[PROXY] Erro ao parar: {ex.Message}")); }
+                _proxy = null;
+                btnStart.Text = "Start Proxy";
+                lblStatus.Text = "Status: Stopped";
+                Log(new LogEvent(DateTime.Now, "[PROXY] Proxy parado."));
+                return;
+            }
+
+            if (!int.TryParse(txtListenPort.Text.Trim(), out int serverListPort))
+            {
+                Log(new LogEvent(DateTime.Now, "[PROXY] Server List Port inválido"));
+                return;
+            }
+            if (!int.TryParse(txtRealPort.Text.Trim(), out int gameServerPort))
+            {
+                Log(new LogEvent(DateTime.Now, "[PROXY] Game Server Port inválido"));
+                return;
+            }
+
+            _serverHost = txtRealHost.Text.Trim();
+            _serverListPort = serverListPort;
+            _gameServerPort = gameServerPort;
+
+            _proxy = new TcpLoopbackProxy();
+            _proxy.OnLog += msg => Log(new LogEvent(DateTime.Now, $"[PROXY] {msg}"));
+            _proxy.OnClientToServer += (dir, data) => AddPacket(dir, data);
+            _proxy.OnServerToClient += (dir, data) => AddPacket(dir, data);
+
+            // Listener do Server List: reescreve o IP do game server para 127.0.0.1
+            _proxy.AddListener(_serverListPort, _serverHost, _serverListPort, rewriteServerList: true);
+            // Listener do Game Server: captura os pacotes do jogo
+            _proxy.AddListener(_gameServerPort, _serverHost, _gameServerPort, rewriteServerList: false);
+
+            try
+            {
+                _proxy.Start();
+                btnStart.Text = "Stop Proxy";
+                lblStatus.Text = $"Status: 127.0.0.1:{_serverListPort} -> {_serverHost}:{_serverListPort} | 127.0.0.1:{_gameServerPort} -> {_serverHost}:{_gameServerPort}";
+                Log(new LogEvent(DateTime.Now, $"[PROXY] Iniciado: ServerList=127.0.0.1:{_serverListPort}, GameServer=127.0.0.1:{_gameServerPort}"));
+            }
+            catch (Exception ex)
+            {
+                Log(new LogEvent(DateTime.Now, $"[PROXY] Falha ao iniciar: {ex.Message}"));
+                _proxy = null;
+            }
+        }
+
+        private void btnBrowse_Click(object? sender, EventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "main.exe|main.exe",
+                Title = "Selecione o main.exe do cliente MU"
+            };
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _exePath = dlg.FileName;
+                txtExePath.Text = _exePath;
+                Log(new LogEvent(DateTime.Now, $"[PATH] main.exe selecionado: {_exePath}"));
+            }
+        }
+
+        private void btnLaunch_Click(object? sender, EventArgs e)
+        {
+            string exePath = txtExePath.Text.Trim();
+            if (string.IsNullOrWhiteSpace(exePath)) exePath = _exePath;
+            _exePath = exePath;
+            string exeDir = Path.GetDirectoryName(exePath)!;
+            string dllPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "byp.dll");
+
+            if (!File.Exists(dllPath))
+            {
+                Log(new LogEvent(DateTime.Now, $"[LAUNCH] byp.dll não encontrada: {dllPath}"));
+                return;
+            }
+            if (!File.Exists(exePath))
+            {
+                Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe não encontrado: {exePath}"));
+                return;
+            }
+
+            var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>() };
+            if (!CreateProcess(exePath, $"\"{exePath}\" /LauncherStart open",
+                IntPtr.Zero, IntPtr.Zero, false,
+                CREATE_SUSPENDED, IntPtr.Zero, exeDir,
+                ref si, out var pi))
+            {
+                Log(new LogEvent(DateTime.Now, $"[LAUNCH] CreateProcess falhou: {Marshal.GetLastWin32Error()}"));
+                return;
+            }
+
+            Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe criado SUSPENSO — PID={pi.dwProcessId}"));
+
+            InjectDll(pi.hProcess, dllPath);
+
+            ResumeThread(pi.hThread);
+            Log(new LogEvent(DateTime.Now, "[LAUNCH] main.exe resumido COM byp.dll injetado"));
+
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+
+        private bool InjectDll(IntPtr hProcess, string dllPath)
+        {
+            byte[] pathBytes = Encoding.ASCII.GetBytes(dllPath + "\0");
+            IntPtr remoteAddr = VirtualAllocEx(hProcess, IntPtr.Zero,
+                (uint)pathBytes.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            if (remoteAddr == IntPtr.Zero)
+            {
+                Log(new LogEvent(DateTime.Now, $"[INJECT] VirtualAllocEx falhou: {Marshal.GetLastWin32Error()}"));
+                return false;
+            }
+
+            if (!WriteProcessMemory(hProcess, remoteAddr, pathBytes, (uint)pathBytes.Length, out _))
+            {
+                Log(new LogEvent(DateTime.Now, $"[INJECT] WriteProcessMemory falhou: {Marshal.GetLastWin32Error()}"));
+                return false;
+            }
+
+            IntPtr kernel32 = GetModuleHandle("kernel32.dll");
+            IntPtr loadLibAddr = GetProcAddress(kernel32, "LoadLibraryA");
+            if (loadLibAddr == IntPtr.Zero)
+            {
+                Log(new LogEvent(DateTime.Now, "[INJECT] GetProcAddress(LoadLibraryA) falhou"));
+                return false;
+            }
+
+            IntPtr hThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0,
+                loadLibAddr, remoteAddr, 0, out _);
+            if (hThread == IntPtr.Zero)
+            {
+                Log(new LogEvent(DateTime.Now, $"[INJECT] CreateRemoteThread falhou: {Marshal.GetLastWin32Error()}"));
+                return false;
+            }
+
+            WaitForSingleObject(hThread, 10000);
+            CloseHandle(hThread);
+
+            Log(new LogEvent(DateTime.Now, $"[INJECT] {Path.GetFileName(dllPath)} injetado com sucesso"));
+            return true;
+        }
+
+        private void btnClear_Click(object sender, EventArgs e) => txtLog.Clear();
+        private void btnClearPacket_Click(object sender, EventArgs e) => lvPackets.Items.Clear();
+
+        private void lvPackets_DoubleClick(object sender, EventArgs e)
+        {
+            if (lvPackets.SelectedItems.Count == 0) return;
+            var item = lvPackets.SelectedItems[0];
+            txtRealPacket.Text = item.SubItems[4].Text;
+            txtPacket.Text = item.SubItems[3].Text;
+        }
+
+        private void btnSendPacket_Click(object sender, EventArgs e)
+        {
+            // TODO: enviar via named pipe inverso para hook.dll reinjetar no socket
+            Log(new LogEvent(DateTime.Now, $"[SEND] {(rbClient.Checked ? "→Client" : "→Server")} {txtPacket.Text} (não implementado)"));
+        }
+
+        private void rbClient_CheckedChanged(object sender, EventArgs e) => rbServer.Checked = false;
+        private void rbServer_CheckedChanged(object sender, EventArgs e) => rbClient.Checked = false;
+
+        private void btnSendPacketDecoded_Click(object sender, EventArgs e)
+        {
+            Log(new LogEvent(DateTime.Now, $"[SEND] {(rbClient.Checked ? "→Client" : "→Server")} {txtRealPacket.Text} (não implementado)"));
+        }
+
+        private void btnBypassPkt_Click(object sender, EventArgs e) => bypassed.Add(txtPacket.Text);
+    }
+}

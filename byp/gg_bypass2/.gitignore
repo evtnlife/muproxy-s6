@@ -1,0 +1,7 @@
+*.sdf
+*.obj
+*.exp
+*.lib
+dist/
+build/
+.vs/
