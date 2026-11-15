@@ -6,7 +6,6 @@
 *.lib
 dist/
 build/
-.vs/
 .vs/*
 *.log
 *.dll
