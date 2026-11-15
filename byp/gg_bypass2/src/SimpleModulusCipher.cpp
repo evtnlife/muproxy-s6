@@ -198,30 +198,9 @@ int SimpleModulusCipher::NativeEncrypt(void* dest, const void* source, int size)
     return fn((void*)smObj, dest, source, size);
 }
 
-// ============================================================================
-// NativeDecrypt: chama SimpleModulus::Decrypt do jogo (0x998490)
-// Usa o objeto global em 0x8797778 — 100% identico ao jogo
-// ============================================================================
-int SimpleModulusCipher::NativeDecrypt(void* dest, const void* source, int size) {
-    uintptr_t base = GameMemory::GetMainBase();
-    if (!base) {
-        Logger::Log("SMOD", "NativeDecrypt FAILED: GetMainBase() returned 0");
-        return -1;
-    }
-    
-    uintptr_t smObj = base + SM_OBJECT_OFFSET;  // 0x8797778
-    
-    // Call the game's decrypt function directly with the SM object.
-    // Do NOT modify DecKey values — the game's function uses its own key layout.
-    // The SM object stores the correct keys for the game's decrypt algorithm.
-    typedef int (__thiscall *SMDecryptFn)(void* smObj, void* dest, const void* source, int size);
-    SMDecryptFn fn = (SMDecryptFn)(base + 0x598490);  // 0x998490
-    
-    Logger::Log("SMOD", "NativeDecrypt: smObj=0x%p, dest=0x%p, source=0x%p, size=%d",
-        (void*)smObj, dest, source, size);
-    
-    return fn((void*)smObj, dest, source, size);
-}
+// NOTA: o NativeDecrypt do jogo (0x998490) foi removido — ele falha em C2S
+// porque o DecKey do Obj1 (0x8797778, slot +0x24) e zero. A Decrypt own
+// (inversa modular do EncKey) e o caminho unico de decifragem.
 
 void SimpleModulusCipher::EncryptBlock(void* dest, const void* source, int size) {
     DWORD* modulus = (DWORD*)&m_keys[0 * SM_KEY_COUNT];

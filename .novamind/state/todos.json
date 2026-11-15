@@ -1,18 +1,14 @@
 [
   {
-    "content": "Rename folder psdisabled → byp on disk and re-point root-repo gitlinks (MuProxy2, gg_bypass2)",
+    "content": "Create references/11-log-analysis.md (log formats + debug recipes)",
     "status": "in_progress"
   },
   {
-    "content": "Remove PS lines from skill refs (01-architecture.md:46-47, 10-references.md:29)",
+    "content": "Update SKILL.md table + quick facts (add §11)",
     "status": "pending"
   },
   {
-    "content": "Update path references: byp/README.md, references/10-references.md prefix, .novamind/memory.md",
-    "status": "pending"
-  },
-  {
-    "content": "Verify: git status clean, no stale 'psdisabled' refs in skill, build.bat intact",
+    "content": "Fix stale log facts in 03/07/08/09 references",
     "status": "pending"
   }
 ]

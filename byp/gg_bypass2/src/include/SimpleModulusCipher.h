@@ -18,11 +18,7 @@ public:
     // Chama a funcao nativa SimpleModulus::Encrypt do jogo (0x998420)
     // Usa o objeto global em 0x8797778 — 100% identico ao jogo
     static int NativeEncrypt(void* dest, const void* source, int size);
-    
-    // Chama a funcao nativa com EncKey/DecKey trocados para decryptar
-    // Cria copia local do objeto, swap EncKey<->DecKey, chama NativeEncrypt
-    static int NativeDecrypt(void* dest, const void* source, int size);
-    
+
 private:
     static uint32_t m_keys[SM_KEY_COUNT * 4]; // Modulus, EncKey, DecKey, XORKey
     static bool m_initialized;

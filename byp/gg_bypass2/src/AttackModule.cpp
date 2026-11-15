@@ -115,9 +115,6 @@ static uint8_t ComputeDirection(uint16_t targetEntityIndex) {
     // VALIDADO: D3 é 0..7 puro (sem 0xC0). O pacote real tem D3=0x04 (S).
     uint8_t dirByte = (uint8_t)dirInt;
 
-    Logger::Log("ATTACK", "ComputeDir: entity=0x%04X p(%.0f,%.0f) t(%.0f,%.0f) dx=%.0f dy=%.0f angle=%.3f dir=%d dirByte=0x%02X",
-                targetEntityIndex, playerX, playerY, targetX, targetY, dx, dy, angle, dirInt, dirByte);
-
     return dirByte;
 }
 
@@ -284,24 +281,9 @@ static bool SendPlainPacket(const uint8_t* packet, int len) {
 }
 
 bool SendAttack(uint16_t entityIndex) {
-    uint16_t attackId = GameMemory::EntityToAttackId(entityIndex);
-    uint16_t gameTargetGlobal = GameMemory::GetTargetGlobal();
-    int32_t gameTargetSlot = GameMemory::GetTargetSlotGlobal();
+    // Ataque normal (0x11) — funciona bem, sem log por hit (evita poluir o log).
     uint8_t packet[16];
     int len = BuildAttackPacket(packet, entityIndex);
-
-    // Log detalhado incluindo action e direction bytes
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
-    float rawAngle = localPlayer ? *(float*)(localPlayer + GameObject::OFF_DIR_ANGLE) : -1.0f;
-    Logger::Log("ATTACK", "Ataque normal: entity=0x%04X attackId(XOR)=0x%04X DIRECT=0x%04X gameGlobal=0x%04X gameSlot=%d action=0x%02X dir=0x%02X angle=%.1f",
-                entityIndex, attackId, entityIndex, gameTargetGlobal, gameTargetSlot, packet[5], packet[6], rawAngle);
-
-    // Hex dump do pacote para verificação
-    char hexBuf[32];
-    int pos = 0;
-    for (int i = 0; i < len && pos + 3 < (int)sizeof(hexBuf); ++i)
-        pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", (unsigned char)packet[i]);
-    Logger::Log("ATTACK", "Pacote attack: [%s]", hexBuf);
 
     SendPlainPacket(packet, len);
     return true;
@@ -318,17 +300,10 @@ bool SendConfiguredAttack(int slotIndex) {
     }
 
     // Usa o entity index (OFF_INDEX) do slot
-    uintptr_t obj = GameMemory::GetObjectByIndex(slotIndex);
     uint16_t entityIndex = GameMemory::GetCompositeIndex(slotIndex);
     if (entityIndex == 0) return false;
 
-    // Log diagnostic: entity index vs game's target global
-    uint16_t gameTargetGlobal = GameMemory::GetTargetGlobal();
-    int32_t gameTargetSlot = GameMemory::GetTargetSlotGlobal();
-    Logger::Log("ATTACK", "SendConfiguredAttack: slot=%d entityIdx=0x%04X gameGlobal=0x%04X gameSlot=%d XOR=0x%04X",
-                slotIndex, entityIndex, gameTargetGlobal, gameTargetSlot, GameMemory::EntityToAttackId(entityIndex));
-
-    // Envia pacote conforme tipo
+    // Envia pacote conforme tipo (skill loga em SendSkillAttack; normal sem log)
     if (g_SessionType == MuOpcodes::ATKTYPE_SKILL) {
         return SendSkillAttack(entityIndex, g_SessionSkillId);
     } else {
@@ -504,7 +479,7 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
 
         if (targetCount == 0) continue;
 
-        // Fire-and-forget: uma thread por monstro
+        // Fire-and-forget: uma thread por monstro (sem log por ciclo — evita poluir o log)
         for (int t = 0; t < targetCount; t++) {
             auto* p = new AttackThreadParam{ targets[t], hitCount };
             HANDLE h = CreateThread(NULL, 0, AttackSingleMobThread, p, 0, NULL);
@@ -515,7 +490,6 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
             }
         }
 
-        Logger::Log("ATTACK", "Dispatcher: %d monstros x %d hits (fire-and-forget)", targetCount, hitCount);
         delete[] targets;
     }
 

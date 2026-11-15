@@ -19,5 +19,5 @@ cd gg_bypass2
 ```
 
 - Game dir (`F:\blackrockmu\`) must contain: `byp.dll`, `opengl32.dll`, `MuProxy2.exe` + deps.
-- Logs: byp.dll writes `gg_bypass2.log` (main) and `byp_packets.log` (packet capture) when
-  `Config::LOG_TO_FILE` is true.
+- Logs: byp.dll writes a **single** `gg_bypass2.log` in the game dir when `Config::LOG_TO_FILE`
+  is true (system + packet logs together; `byp_packets.log` was removed). See §11 for how to read it.

@@ -17,6 +17,5 @@
 | MONSTER_SCAN_INTERVAL_MS | 500 | object-array scan period |
 | MONSTER_DEFAULT_FILTER | 0x7 | monster type filter |
 | ATTACK_INTERVAL_MS / ATTACK_DEFAULT_DELAY_MS | 800 | attack cadence |
-| LOG_FILENAME | gg_bypass2.log | main log |
-| PACKET_LOG_FILENAME | byp_packets.log | packet capture log |
+| LOG_FILENAME | gg_bypass2.log | single log (system + packets) |
 | VERSION | 3.1.0 | byp.dll version |

@@ -66,10 +66,10 @@ TRUE plaintext  →  XorData [3,len)  →  Layer-1  →  WIRE
 - Block: 8 bytes in → 11 bytes out (`SM_BLOCK_SIZE=8`, `SM_ENCRYPTED_SIZE=11`).
 - Bit packing is **MSB-first** (matches the game's `ShiftBytes`). Checksum:
   `finale[1]=0xF8` XOR'd over the source bytes; `finale[0]=(size ^ 0x3D) ^ finale[1]`.
-- Native path: `NativeEncrypt` calls the game's `SimpleModulus::Encrypt` at `0x998420`;
-  `NativeDecrypt` calls `0x998490` (100% identical to the game).
-- **`NativeDecrypt` always fails for C→S** (Obj1 DecKey = zeros by design) — don't chase it; it's
-  not a bug.
+- Native path: `NativeEncrypt` calls the game's `SimpleModulus::Encrypt` at `0x998420` (used only
+  in the init self-test). `NativeDecrypt` (game's `0x998490`) was **removed** — it always failed
+  for C→S (Obj1 DecKey = zeros), so byp.dll's own `Decrypt` (DecKey = modular inverse of EncKey)
+  is the **sole** C3/C4 decryption path.
 
 ## Skill attack opcodes
 - Two skill opcodes exist (`MuOpcodes.h`):

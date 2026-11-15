@@ -14,7 +14,8 @@
 
 ## Debugging — common failure modes
 The most frequent real task is "something is broken, why?". Match the symptom, then go to the
-referenced section for the underlying fact.
+referenced section for the underlying fact. **Before reading `gg_bypass2.log`, read §11 (log
+analysis)** — it documents the exact line formats and what is intentionally absent.
 
 | Symptom | Likely cause | Where to look |
 |---------|--------------|---------------|
@@ -22,7 +23,7 @@ referenced section for the underlying fact.
 | Server sees the wrong target / attack misses | Wrong index. Attack 0x11 uses the **raw** entityIndex (big-endian); the `0xEFF5` XOR is for **skill 0x19 only**. Also the slot index ≠ entityIndex — `& 0x3FF` does NOT work. | §4 (D0/D1), §5 (slot-index note). |
 | Skill attack target wrong | For 0x19 the target is `entityIndex ^ 0xEFF5` (the value in global `0x081C03A4` / the UI "Atk ID"), NOT the raw entity. And index/skill bytes are interleaved H/L. | §4 skill attack. |
 | Everything breaks after updating `main.exe` | All offsets in `GameAddresses.h` are **ex603-specific**. A binary change invalidates every offset. | §5, §10 — re-validate all offsets. |
-| C3 packet won't decrypt (client→server) | **By design** — Obj1 DecKey is zeros, so `NativeDecrypt` always fails C→S. Not a bug; don't chase it. | §3 (C3 / SimpleModulus). |
+| C3 packet won't decrypt (client→server) | Keys changed (re-login) or checksum fail — read the `checksum calc/expected` line and the `Live .. Cached ..` key diff in the log. `NativeDecrypt` no longer exists; own `Decrypt` is the only path. | §11 (log analysis), §3. |
 | Packet List is empty | Wrong channel. The List is fed by **44413 (PKT)**, not the 44411/55902 proxy (a blind relay). Check byp.dll's PKT connection. | §2. |
 | `byp.dll` never loads | The game must load `opengl32.dll` from the **game dir**; that DLL must be the GLProxy wrapper (not System32's), and `byp.dll` must sit next to it. | §1. |
 | Decryption yields garbage / off-by-one | XorData is **not self-inverse in place** — decrypt must use the *encrypted* previous byte. Also Layer-1-only decrypt gives the XorData form, not the real plaintext. | §3 (Camada-2, decryption gotcha). |

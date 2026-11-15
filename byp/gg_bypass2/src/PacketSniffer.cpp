@@ -596,8 +596,9 @@ static void FlushReasmBuffer(SOCKET s, const char* dir, unsigned char xorKey, un
 }
 
 // ============================================================================
-// LogRaw: loga bytes RAW no arquivo, mas envia bytes DECIFRADOS/REAGRUPADOS
-// ao proxy. So decifra trafego do game server (porta 55902).
+// LogRaw: reassemble + envia bytes DECIFRADOS ao proxy. Nao loga hex bruto
+// (o log detalhado fica no HookSend/HookWSASend). So decifra trafego do
+// game server (porta 55902).
 // ============================================================================
 static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
 {
@@ -634,11 +635,8 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
         srcLen = copyLen;
     }
 
-    // Log em arquivo: crypted (raw) + decrypted na mesma linha para pacotes do game server
-    if (isGameServer)
-        Logger::LogPacketDual("PACKETSNIFFER", dir, data, len, decrypted, srcLen);
-    else
-        Logger::LogPacket("PACKETSNIFFER", dir, data, len);
+    // Nao loga hex bruto aqui (poluicao). O log detalhado (stack trace, C3/C4
+    // decrypt, SMOD) e feito no HookSend/HookWSASend. So reassemble + proxy.
 
     std::vector<BYTE>* buf = GetReasmBuffer(s);
     buf->insert(buf->end(), (const BYTE*)src, (const BYTE*)src + srcLen);
@@ -748,7 +746,8 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
                     hdrType, displayLen, hex);
         LogStackTrace("SEND stack", ebpFrame);
 
-        // Tenta decryptar C3/C4: primeiro NativeDecrypt, depois Decrypt como fallback
+        // Decifra C3/C4 com a nossa Decrypt (DecKey = inversa modular do EncKey).
+        // O NativeDecrypt do jogo falha em C2S: o DecKey do Obj1 (0x8797778) e zero.
         if (isGS && displayLen > 2 && ((unsigned char)displayBuf[0] == 0xC3 || (unsigned char)displayBuf[0] == 0xC4)) {
             uint8_t pktHdr = (unsigned char)displayBuf[0];
             int hdrSize = (pktHdr == 0xC3) ? 2 : 3;  // C3=2 bytes header, C4=3 bytes header
@@ -767,21 +766,12 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
                 uint8_t decrypted[256];
                 bool decryptedOk = false;
                 
-                // Try NativeDecrypt first (game's own function)
-                int decLen = SimpleModulusCipher::NativeDecrypt(decrypted, displayBuf + hdrSize, smLen);
+                int decLen = SimpleModulusCipher::Decrypt(decrypted, displayBuf + hdrSize, smLen);
                 if (decLen > 0) {
                     decryptedOk = true;
-                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt (native): OK decLen=%d", decLen);
+                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt: OK decLen=%d", decLen);
                 } else {
-                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt (native): FAILED (decLen=%d), trying own decrypt", decLen);
-                    // Fallback: use our own Decrypt implementation
-                    decLen = SimpleModulusCipher::Decrypt(decrypted, displayBuf + hdrSize, smLen);
-                    if (decLen > 0) {
-                        decryptedOk = true;
-                        Logger::Log("PACKETSNIFFER", "SEND C3 decrypt (own): OK decLen=%d", decLen);
-                    } else {
-                        Logger::Log("PACKETSNIFFER", "SEND C3 decrypt (own): FAILED (decLen=%d)", decLen);
-                    }
+                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt: FAILED (decLen=%d)", decLen);
                 }
                 
                 if (decryptedOk) {

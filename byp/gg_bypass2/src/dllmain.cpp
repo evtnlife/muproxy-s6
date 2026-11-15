@@ -101,21 +101,17 @@ extern "C" __declspec(dllexport) void DummyFunc() {}
 
 static void InitializeLogging(HMODULE hModule) {
     char logPath[MAX_PATH] = {0};
-    char pktPath[MAX_PATH] = {0};
     if (GetModuleFileNameA(hModule, logPath, MAX_PATH)) {
         char* lastSlash = strrchr(logPath, '\\');
         if (lastSlash) {
             *(lastSlash + 1) = '\0';
-            strcpy_s(pktPath, sizeof(pktPath), logPath);
             strcat_s(logPath, sizeof(logPath), Config::LOG_FILENAME);
-            strcat_s(pktPath, sizeof(pktPath), Config::PACKET_LOG_FILENAME);
         }
     }
     if (logPath[0] == '\0') {
         strcpy_s(logPath, sizeof(logPath), Config::LOG_FILENAME);
-        strcpy_s(pktPath, sizeof(pktPath), Config::PACKET_LOG_FILENAME);
     }
-    Logger::Initialize(logPath, pktPath);
+    Logger::Initialize(logPath);
 }
 
 static void SafeInitialize(HMODULE hModule) {

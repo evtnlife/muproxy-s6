@@ -26,6 +26,7 @@ debugging) lives in the referenced file. **Read the relevant reference before ed
 | 8 | Feature flags & config | Config.h flags + tunables. | `references/08-config.md` |
 | 9 | Golden rules & debugging | anti-gambiarra rules + failure-mode table. | `references/09-golden-rules-debug.md` |
 | 10 | References & meta | OpenMU packet docs, ex603 emulator, key files, open questions. | `references/10-references.md` |
+| 11 | Log analysis | single `gg_bypass2.log`; exact line formats, what's intentionally absent, debug recipes. | `references/11-log-analysis.md` |
 
 ## Quick facts (most-used)
 - **Inject a normal attack:** build TRUE plaintext `C1 07 11 <idxHi> <idxLo> 78 <dir 0..7>`, call
@@ -37,3 +38,5 @@ debugging) lives in the referenced file. **Read the relevant reference before ed
 - **Object array:** `*(main.exe+0xA7C224)` → `+0x8` → array; `object[i] = array + i*0x598`
   (400 slots). Slot index is NOT derivable from entityIndex.
 - **All offsets are ex603-specific** — re-validate if `main.exe` changes.
+- **Logs:** one file, `F:\blackrockmu\gg_bypass2.log`. Read §11 before analyzing a session —
+  normal attacks log nothing, `LogRaw` dumps no hex, and `NativeDecrypt` lines no longer exist.

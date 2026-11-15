@@ -5,7 +5,8 @@
 // Logger — Log simples em arquivo para debug/diagnostico
 // ============================================================================
 namespace Logger {
-    void Initialize(const char* filePath, const char* packetLogPath);
+    // Abre o arquivo unico de log (sistema + pacotes no mesmo arquivo).
+    void Initialize(const char* filePath);
     void Shutdown();
     void Log(const char* tag, const char* fmt, ...);
     void LogPacket(const char* tag, const char* dir, const char* data, int len);

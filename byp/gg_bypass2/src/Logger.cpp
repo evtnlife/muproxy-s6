@@ -5,12 +5,11 @@
 #include <stdarg.h>
 #include <share.h>
 
-static FILE* g_LogFile = nullptr;
-static FILE* g_PacketLogFile = nullptr;
+static FILE* g_LogFile = nullptr;  // arquivo unico: logs de sistema + pacotes
 static CRITICAL_SECTION g_LogLock;
 static volatile LONG g_LogInitialized = 0;
 
-void Logger::Initialize(const char* filePath, const char* packetLogPath) {
+void Logger::Initialize(const char* filePath) {
     if (InterlockedCompareExchange(&g_LogInitialized, 1, 0) == 0) {
         InitializeCriticalSection(&g_LogLock);
     }
@@ -22,12 +21,7 @@ void Logger::Initialize(const char* filePath, const char* packetLogPath) {
         fclose(g_LogFile);
         g_LogFile = nullptr;
     }
-    if (g_PacketLogFile) {
-        fclose(g_PacketLogFile);
-        g_PacketLogFile = nullptr;
-    }
     g_LogFile = _fsopen(filePath, "a", _SH_DENYNO);
-    g_PacketLogFile = _fsopen(packetLogPath, "a", _SH_DENYNO);
     LeaveCriticalSection(&g_LogLock);
 }
 
@@ -38,10 +32,6 @@ void Logger::Shutdown() {
     if (g_LogFile) {
         fclose(g_LogFile);
         g_LogFile = nullptr;
-    }
-    if (g_PacketLogFile) {
-        fclose(g_PacketLogFile);
-        g_PacketLogFile = nullptr;
     }
     LeaveCriticalSection(&g_LogLock);
 
@@ -89,15 +79,15 @@ void Logger::LogPacket(const char* tag, const char* dir, const char* data, int l
     SYSTEMTIME st;
     GetLocalTime(&st);
 
-    if (g_PacketLogFile) {
-        fprintf(g_PacketLogFile, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] len=%d hex=",
+    if (g_LogFile) {
+        fprintf(g_LogFile, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] len=%d hex=",
             st.wYear, st.wMonth, st.wDay,
             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
             tag, dir, len);
         for (int i = 0; i < len; ++i)
-            fprintf(g_PacketLogFile, "%02X", (unsigned char)data[i]);
-        fprintf(g_PacketLogFile, "\n");
-        fflush(g_PacketLogFile);
+            fprintf(g_LogFile, "%02X", (unsigned char)data[i]);
+        fprintf(g_LogFile, "\n");
+        fflush(g_LogFile);
     }
 
     LeaveCriticalSection(&g_LogLock);
@@ -112,20 +102,21 @@ void Logger::LogPacketDual(const char* tag, const char* dir, const char* raw, in
     SYSTEMTIME st;
     GetLocalTime(&st);
 
-    if (g_PacketLogFile) {
-        fprintf(g_PacketLogFile, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] len=%d hex=",
+    if (g_LogFile) {
+        // Formato antigo: hex=<raw wire> dec=<decodificado>
+        fprintf(g_LogFile, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] len=%d hex=",
             st.wYear, st.wMonth, st.wDay,
             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
             tag, dir, rawLen);
         for (int i = 0; i < rawLen; ++i)
-            fprintf(g_PacketLogFile, "%02X", (unsigned char)raw[i]);
+            fprintf(g_LogFile, "%02X", (unsigned char)raw[i]);
         if (dec && decLen > 0) {
-            fprintf(g_PacketLogFile, " dec=");
+            fprintf(g_LogFile, " dec=");
             for (int i = 0; i < decLen; ++i)
-                fprintf(g_PacketLogFile, "%02X", (unsigned char)dec[i]);
+                fprintf(g_LogFile, "%02X", (unsigned char)dec[i]);
         }
-        fprintf(g_PacketLogFile, "\n");
-        fflush(g_PacketLogFile);
+        fprintf(g_LogFile, "\n");
+        fflush(g_LogFile);
     }
 
     LeaveCriticalSection(&g_LogLock);

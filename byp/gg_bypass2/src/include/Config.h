@@ -10,8 +10,8 @@ namespace Config {
 constexpr bool BYPASS_ENABLED = true;
 
 // --- Logging ---
+// Arquivo único de log na pasta do jogo (logs de sistema + pacotes juntos).
 constexpr const char *LOG_FILENAME = "gg_bypass2.log";
-constexpr const char *PACKET_LOG_FILENAME = "byp_packets.log";
 constexpr bool LOG_TO_FILE = true;  // true=grava logs em disco, false=só envia via TCP pro MuProxy2
 
 // --- Versão ---
