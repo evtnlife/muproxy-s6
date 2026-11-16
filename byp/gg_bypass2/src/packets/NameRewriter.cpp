@@ -1,7 +1,7 @@
 // NameRewriter.cpp — Rewrite de nome/classe no pacote de create-char (0x31)
 //
 // Extraído do PacketSniffer (Fase 3 do refactor reorganize-byp-modules).
-#include "include/NameRewriter.h"
+#include "NameRewriter.h"
 
 #include <cstring>
 

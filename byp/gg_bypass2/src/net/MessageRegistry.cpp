@@ -1,6 +1,6 @@
 // MessageRegistry.cpp — Sistema de mensagens tipadas
-#include "include/MessageRegistry.h"
-#include "include/Logger.h"
+#include "MessageRegistry.h"
+#include "Logger.h"
 
 #include <cstring>
 

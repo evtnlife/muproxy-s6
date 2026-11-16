@@ -1,6 +1,6 @@
-#include "include/Logger.h"
-#include "include/Config.h"
-#include "include/sdk.h"
+#include "Logger.h"
+#include "Config.h"
+#include "sdk.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <share.h>

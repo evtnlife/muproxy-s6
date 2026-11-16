@@ -1,7 +1,7 @@
 // GameMemory.cpp — Implementação de leitura de memória do MU Online client
-#include "include/GameMemory.h"
-#include "include/GameAddresses.h"
-#include "include/Logger.h"
+#include "GameMemory.h"
+#include "GameAddresses.h"
+#include "Logger.h"
 
 namespace GameMemory {
 

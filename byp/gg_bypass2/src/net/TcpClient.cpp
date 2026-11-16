@@ -1,12 +1,12 @@
 // TcpClient.cpp — Implementação da conexão TCP com MuProxy2
-#include "include/sdk.h"
+#include "sdk.h"
 #include <mstcpip.h>
 #include <cstdio>
 #include <cstdarg>
 
-#include "include/TcpClient.h"
-#include "include/PacketHandler.h"
-#include "include/Logger.h"
+#include "TcpClient.h"
+#include "PacketHandler.h"
+#include "Logger.h"
 
 #pragma comment(lib, "ws2_32.lib")
 

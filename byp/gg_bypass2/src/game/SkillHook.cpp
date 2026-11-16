@@ -3,11 +3,11 @@
 // Hook 1: 0x404D70 (SKILL_ENCRYPT_SEND)
 // Hook 2: 0x4050D0 (SKILL_BUILDER_ADD_DATA)
 // Hook 3: 0x998420 (SIMPLEMODULUS_ENCRYPT)
-#include "include/SkillHook.h"
-#include "include/InlineHook.h"
-#include "include/Logger.h"
-#include "include/GameMemory.h"
-#include "include/GameAddresses.h"
+#include "SkillHook.h"
+#include "InlineHook.h"
+#include "Logger.h"
+#include "GameMemory.h"
+#include "GameAddresses.h"
 
 #include <cstdio>
 #include <cstring>

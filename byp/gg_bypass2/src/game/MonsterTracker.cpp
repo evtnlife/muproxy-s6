@@ -1,12 +1,12 @@
 // MonsterTracker.cpp — Escaneia array de objetos e envia dados via TCP
-#include "include/MonsterTracker.h"
-#include "include/GameMemory.h"
-#include "include/GameAddresses.h"
-#include "include/GameObject.h"
-#include "include/ObjType.h"
-#include "include/TcpClient.h"
-#include "include/Logger.h"
-#include "include/PacketHandler.h"
+#include "MonsterTracker.h"
+#include "GameMemory.h"
+#include "GameAddresses.h"
+#include "GameObject.h"
+#include "ObjType.h"
+#include "TcpClient.h"
+#include "Logger.h"
+#include "PacketHandler.h"
 
 #include <cstdio>
 #include <cstring>

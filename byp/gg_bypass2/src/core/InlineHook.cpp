@@ -1,7 +1,7 @@
 // InlineHook.cpp — Implementação de hook inline genérico para x86
 // Suporta stolenLen configurável para não cortar instruções no meio.
-#include "include/InlineHook.h"
-#include "include/Logger.h"
+#include "InlineHook.h"
+#include "Logger.h"
 
 bool InlineHook::Install(void* target, void* hookFunc, int stolenLen) {
     if (!target || !hookFunc) return false;

@@ -1,6 +1,6 @@
 // SkillMap.cpp — Mapa dinâmico SkillNumber -> SkillIndex
-#include "include/SkillMap.h"
-#include "include/Logger.h"
+#include "SkillMap.h"
+#include "Logger.h"
 
 #include <map>
 

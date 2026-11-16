@@ -1,6 +1,6 @@
-#include "include/sdk.h"
-#include "include/SimpleModulusCipher.h"
-#include "include/GameMemory.h"
+#include "sdk.h"
+#include "SimpleModulusCipher.h"
+#include "GameMemory.h"
 #include "Logger.h"
 #include <cstring>
 #include <cstdio>

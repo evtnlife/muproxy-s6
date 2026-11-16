@@ -1,19 +1,19 @@
-#include "include/sdk.h"
+#include "sdk.h"
 #include <cstdio>
 #include <cstring>
 #include <map>
 #include <vector>
 
-#include "include/PacketSniffer.h"
-#include "include/Config.h"
-#include "include/Logger.h"
-#include "include/GameMemory.h"
-#include "include/MuCipher.h"
-#include "include/SimpleModulusCipher.h"
-#include "include/ViewportMap.h"
-#include "include/SkillMap.h"
-#include "include/PacketReassembler.h"
-#include "include/NameRewriter.h"
+#include "PacketSniffer.h"
+#include "Config.h"
+#include "Logger.h"
+#include "GameMemory.h"
+#include "MuCipher.h"
+#include "SimpleModulusCipher.h"
+#include "ViewportMap.h"
+#include "SkillMap.h"
+#include "PacketReassembler.h"
+#include "NameRewriter.h"
 
 #pragma comment(lib, "ws2_32.lib")
 

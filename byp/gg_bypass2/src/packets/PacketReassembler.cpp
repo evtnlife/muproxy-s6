@@ -1,8 +1,8 @@
 // PacketReassembler.cpp — Reassemble de stream TCP em pacotes MU Online
 //
 // Extraído do PacketSniffer (Fase 3 do refactor reorganize-byp-modules).
-#include "include/PacketReassembler.h"
-#include "include/MuCipher.h"
+#include "PacketReassembler.h"
+#include "MuCipher.h"
 
 #include <map>
 #include <vector>

@@ -1,11 +1,11 @@
 // PacketHandler.cpp — Dispatcher de comandos recebidos do MuProxy2
 // Agora delega para MessageRegistry (sistema de mensagens tipadas).
-#include "include/PacketHandler.h"
-#include "include/MessageRegistry.h"
-#include "include/Logger.h"
-#include "include/TcpClient.h"
-#include "include/GameMemory.h"
-#include "include/MuOpcodes.h"
+#include "PacketHandler.h"
+#include "MessageRegistry.h"
+#include "Logger.h"
+#include "TcpClient.h"
+#include "GameMemory.h"
+#include "MuOpcodes.h"
 
 #include <cstring>
 #include <cstdlib>
