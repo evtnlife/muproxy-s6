@@ -7,7 +7,8 @@
 // às de antes da extração.
 #include "DebugTools.h"
 #include "CommandParams.h"
-#include "GameMemory.h"
+#include "GameMemory/Object.h"
+#include "GameMemory/Player.h"
 #include "GameObject.h"
 #include "GameAddresses.h"
 #include "MessageRegistry.h"

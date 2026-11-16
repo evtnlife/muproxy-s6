@@ -1,76 +1,17 @@
-// GameMemory.cpp — Implementação de leitura de memória do MU Online client
-#include "GameMemory.h"
+// game/GameMemory/Player.cpp — Jogador local (objeto do viewport, character e stats)
+#include "GameMemory/Player.h"
+#include "GameMemory/Object.h"
+#include "GameMemory/Globals.h"
 #include "GameAddresses.h"
+#include "GameObject.h"
+#include "CharacterStruct.h"
+#include "ObjType.h"
 #include "Logger.h"
 
 namespace GameMemory {
-
-static uintptr_t g_MainBase = 0;
-static uintptr_t g_MainDllBase = 0;
-static uint16_t g_LocalPlayerIndex = 0;  // Index do jogador local (setado via D4)
-
-// ============================================================================
-// Globals
-// ============================================================================
-namespace Globals {
-
-uintptr_t MainBase() {
-    if (g_MainBase == 0) {
-        // Tenta "main.exe" primeiro
-        g_MainBase = (uintptr_t)GetModuleHandleA("main.exe");
-        // Fallback: GetModuleHandle(NULL) = base do executavel principal
-        if (!g_MainBase) {
-            g_MainBase = (uintptr_t)GetModuleHandleA(NULL);
-        }
-        if (g_MainBase) {
-            Logger::Log("GAMEMEMORY", "main.exe base = 0x%p", (void*)g_MainBase);
-        }
-    }
-    return g_MainBase;
-}
-
-uintptr_t MainDllBase() {
-    if (g_MainDllBase == 0) {
-        g_MainDllBase = (uintptr_t)GetModuleHandleA("Main.dll");
-        if (g_MainDllBase) {
-            Logger::Log("GAMEMEMORY", "Main.dll base = 0x%p", (void*)g_MainDllBase);
-        }
-    }
-    return g_MainDllBase;
-}
-
-} // namespace Globals
-
-// ============================================================================
-// Object
-// ============================================================================
-namespace Object {
-
-uintptr_t Manager() {
-    uintptr_t base = Globals::MainBase();
-    if (!base) return 0;
-    return *(uintptr_t*)(base + GameAddresses::OBJ_MANAGER_PTR);
-}
-
-uintptr_t Array() {
-    uintptr_t manager = Manager();
-    if (!manager) return 0;
-    return *(uintptr_t*)(manager + GameAddresses::OBJ_ARRAY_OFFSET);
-}
-
-uintptr_t ByIndex(int index) {
-    if (index < 0 || index >= GameAddresses::MAX_OBJECTS) return 0;
-    uintptr_t arrayBase = Array();
-    if (!arrayBase) return 0;
-    return arrayBase + index * GameAddresses::OBJECT_SIZE;
-}
-
-} // namespace Object
-
-// ============================================================================
-// Player
-// ============================================================================
 namespace Player {
+
+static uint16_t g_LocalPlayerIndex = 0;  // Index do jogador local (setado via D4)
 
 void SetIndex(uint16_t index) {
     g_LocalPlayerIndex = index;
@@ -173,5 +114,4 @@ uintptr_t UserObject() {
 }
 
 } // namespace Player
-
 } // namespace GameMemory

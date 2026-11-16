@@ -22,6 +22,7 @@
 #include "PacketInjector.h"
 #include "PacketChannel.h"
 #include "CommandChannel.h"
+#include "GameServerConnection.h"
 #include "WinsockHooks.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -109,9 +110,9 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
     // Detecta a porta do GS via C116 (ConnectToServer) no trafego RECV
     // (login server -> cliente). O pacote chega cifrado, entao escaneamos os bytes crus.
     if (dir && dir[0] == 'R')
-        WinsockHooks::DetectGsPortFromC116(data, len);
+        GameServerConnection::DetectGsPortFromC116(data, len);
 
-    bool isGameServer = WinsockHooks::IsGameServerSocket(s);
+    bool isGameServer = GameServerConnection::IsGameServerSocket(s);
 
     unsigned char xorKey = 0, subKey = 0;
     if (isGameServer) MuCipher::GetGameServerKeys(&xorKey, &subKey);
@@ -156,8 +157,8 @@ bool Install()
     // DLL_PROCESS_ATTACH) para capturar o connect do jogo ao game server.
     if (!WinsockHooks::Install()) return false;
 
-    // O módulo de injeção usa os hooks como transporte (socket do GS).
-    PacketInjector::SetSender(WinsockHooks::SendToGameServer);
+    // O módulo de injeção usa a conexão do GS como transporte (socket do GS).
+    PacketInjector::SetSender(GameServerConnection::SendToGameServer);
 
     // O canal de pacotes (44413) sobe depois dos hooks: assim o connect já
     // usa o trampoline original.

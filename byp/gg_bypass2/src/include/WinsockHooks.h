@@ -38,17 +38,7 @@ bool Install();
 // Remove os hooks (restaura os bytes originais).
 void Uninstall();
 
-// ---- Rastreamento do game server ----
-
-// True se o socket pertence ao game server (porta conhecida ou detectada no C116).
-bool IsGameServerSocket(SOCKET s);
-
-// Detecta a porta do GS pelo pacote C116 (login server → cliente, em claro).
-void DetectGsPortFromC116(const char* data, int len);
-
-// Envia bytes JÁ CIFRADOS no socket do game server.
-// É o transporte do PacketInjector. O socket do jogo está conectado ao
-// MuProxy2, que faz relay puro para o GS real.
-bool SendToGameServer(const uint8_t* data, int len);
+// O rastreamento do socket do game server (e o transporte da injeção) vive no
+// módulo GameServerConnection.
 
 } // namespace WinsockHooks

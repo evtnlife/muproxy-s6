@@ -1,7 +1,8 @@
 // AttackModule.cpp — Monta e envia pacotes de ataque (normal + skill)
 #include "AttackModule.h"
 #include "MuOpcodes.h"
-#include "GameMemory.h"
+#include "GameMemory/Object.h"
+#include "GameMemory/Player.h"
 #include "GameObject.h"
 #include "ObjType.h"
 #include "GameAddresses.h"

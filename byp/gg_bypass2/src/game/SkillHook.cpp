@@ -6,7 +6,7 @@
 #include "SkillHook.h"
 #include "InlineHook.h"
 #include "Logger.h"
-#include "GameMemory.h"
+#include "GameMemory/Globals.h"
 #include "GameAddresses.h"
 
 #include <cstdio>

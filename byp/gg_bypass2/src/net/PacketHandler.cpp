@@ -4,7 +4,6 @@
 #include "MessageRegistry.h"
 #include "Logger.h"
 #include "CommandChannel.h"
-#include "GameMemory.h"
 #include "MuOpcodes.h"
 
 #include <cstring>

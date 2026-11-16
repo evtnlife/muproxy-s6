@@ -11,54 +11,14 @@
 #include "WinsockHooks.h"
 #include "Logger.h"
 #include "MuCipher.h"
-#include "SimpleModulusCipher.h"
+#include "StackTrace.h"
+#include "GameServerConnection.h"
+#include "C3Decoder.h"
 #include "OriginalApi.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 namespace WinsockHooks {
-
-// ============================================================================
-// Stack trace manual via EBP walk (x86)
-// O EBP é capturado no caller (HookSend) e passado aqui.
-// ============================================================================
-static void LogStackTrace(const char* prefix, uintptr_t* pEbp) {
-    char buf[2048];
-    int pos = snprintf(buf, sizeof(buf), "%s:", prefix);
-
-    int depth = 0;
-    while (pEbp && depth < 32 && pos < (int)sizeof(buf) - 100) {
-        // Proteção contra EBP inválido
-        if ((uintptr_t)pEbp < 0x10000 || ((uintptr_t)pEbp & 3)) break;
-        __try {
-            uintptr_t retAddr = pEbp[1];
-            if (retAddr == 0 || retAddr < 0x10000) break;
-
-            MEMORY_BASIC_INFORMATION mbi;
-            if (VirtualQuery((void*)retAddr, &mbi, sizeof(mbi)) && mbi.AllocationBase) {
-                HMODULE hMod = (HMODULE)mbi.AllocationBase;
-                char modPath[256];
-                if (GetModuleFileNameA(hMod, modPath, sizeof(modPath))) {
-                    const char* basename = strrchr(modPath, '\\');
-                    basename = basename ? basename + 1 : modPath;
-                    uintptr_t offset = retAddr - (uintptr_t)hMod;
-                    pos += snprintf(buf + pos, sizeof(buf) - pos, " %s+0x%X", basename, (unsigned)offset);
-                } else {
-                    pos += snprintf(buf + pos, sizeof(buf) - pos, " 0x%p", (void*)retAddr);
-                }
-            } else {
-                pos += snprintf(buf + pos, sizeof(buf) - pos, " 0x%p", (void*)retAddr);
-            }
-
-            pEbp = (uintptr_t*)pEbp[0];
-            depth++;
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-            break;
-        }
-    }
-
-    Logger::Log("PACKETSNIFFER", "%s", buf);
-}
 
 // ============================================================================
 // APIs originais (trampolines dos hooks)
@@ -101,69 +61,6 @@ void SetSocketClosedObserver(SocketClosedObserver observer) {
 // ============================================================================
 // Socket do game server (rastreado no connect do jogo)
 // ============================================================================
-static SOCKET g_GameServerSocket = INVALID_SOCKET;
-
-// Porta do game server detectada automaticamente via pacote C116
-// (0xC1 0x16 = "ConnectToServer": login server informa IP+porta do GS).
-// 0 = ainda nao detectado (usa o range hardcoded abaixo).
-static int g_DetectedGsPort = 0;
-
-// Portas do game server (apenas trafego nelas sera decifrado)
-static bool IsGameServerPort(int port) {
-    if (port == 55902 || (port >= 55901 && port <= 55950)) return true;
-    if (g_DetectedGsPort != 0 && port == g_DetectedGsPort) return true;
-    return false;
-}
-
-// ============================================================================
-// Detecção da porta do GS via C116 (ConnectToServer).
-// O login server NAO cifra o trafego (em claro). Formato real (22 bytes):
-//   C1 16 [charID 2B LE] [IP 16B null-padded] [porta 2B LE]
-// Exemplo capturado: C1 16 F4 03 "145.239.149.84\0.." 4D B3  -> porta 45901.
-// Escaneamos o buffer RECV pela assinatura em claro C1 16, validamos que o
-// campo IP comeca com digito e lemos a porta no offset 20 (little-endian).
-// ============================================================================
-void DetectGsPortFromC116(const char* data, int len)
-{
-    const int C116_LEN = 22;
-    if (len < C116_LEN) return;
-    for (int i = 0; i + C116_LEN <= len; ++i)
-    {
-        // Assinatura em claro de C1 16 (login server nao cifra)
-        if ((unsigned char)data[i] != 0xC1 || (unsigned char)data[i + 1] != 0x16) continue;
-
-        // Campo IP (offset 4) deve comecar com digito (primeiro char de um IPv4)
-        if (data[i + 4] < '0' || data[i + 4] > '9') continue;
-
-        // Porta no offset 20 (2B header + 2B charID + 16B IP buffer), little-endian
-        int port = ((unsigned char)data[i + 21] << 8) | (unsigned char)data[i + 20];
-        if (port < 1024 || port > 65535) continue;
-
-        if (g_DetectedGsPort != port)
-        {
-            g_DetectedGsPort = port;
-            Logger::Log("PACKETSNIFFER", "C116: porta do GS detectada = %d", port);
-        }
-        return;
-    }
-}
-
-// Armazena a porta remota por socket para filtrar trafego
-static bool GetSocketPort(SOCKET s, int* outPort) {
-    sockaddr_in addr;
-    int addrLen = sizeof(addr);
-    if (getpeername(s, (sockaddr*)&addr, &addrLen) == 0) {
-        *outPort = ntohs(addr.sin_port);
-        return true;
-    }
-    return false;
-}
-
-bool IsGameServerSocket(SOCKET s)
-{
-    int port = 0;
-    return GetSocketPort(s, &port) && IsGameServerPort(port);
-}
 
 // ============================================================================
 // Overlapped WSARecv completion routine hook
@@ -195,10 +92,10 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
 
         // Fallback: se o socket do GS ainda nao foi capturado pelo connect,
         // captura aqui no primeiro send do jogo (ex: pacote de login)
-        if (g_GameServerSocket == INVALID_SOCKET) {
+        if (GameServerConnection::GetSocket() == INVALID_SOCKET) {
             int port = 0;
-            if (GetSocketPort(s, &port) && IsGameServerPort(port)) {
-                g_GameServerSocket = s;
+            if (GameServerConnection::GetSocketPort(s, &port) && GameServerConnection::IsGameServerPort(port)) {
+                GameServerConnection::SetSocket(s);
                 Logger::Log("PACKETSNIFFER", "Game server socket rastreado via SEND: %d (porta %d)", (int)s, port);
             }
         }
@@ -211,7 +108,7 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
         // O jogo envia bytes cifrados (headers FC/FE), mas queremos ver C1/C2/C3/C4.
         // Aplica MuCipher::FullDecrypt (apenas Layer-1, sem XorFilter) em uma copia.
         int port = 0;
-        bool isGS = GetSocketPort(s, &port) && IsGameServerPort(port);
+        bool isGS = GameServerConnection::GetSocketPort(s, &port) && GameServerConnection::IsGameServerPort(port);
         char decBuf[4096];
         const char* displayBuf = buf;
         int displayLen = len;
@@ -245,87 +142,12 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
 
         Logger::Log("PACKETSNIFFER", "SEND %s %d bytes [%s]",
                     hdrType, displayLen, hex);
-        LogStackTrace("SEND stack", ebpFrame);
+        StackTrace::Log("SEND stack", ebpFrame);
 
         // Decifra C3/C4 com a nossa Decrypt (DecKey = inversa modular do EncKey).
         // O NativeDecrypt do jogo falha em C2S: o DecKey do Obj1 (0x8797778) e zero.
-        if (isGS && displayLen > 2 && ((unsigned char)displayBuf[0] == 0xC3 || (unsigned char)displayBuf[0] == 0xC4)) {
-            uint8_t pktHdr = (unsigned char)displayBuf[0];
-            int hdrSize = (pktHdr == 0xC3) ? 2 : 3;  // C3=2 bytes header, C4=3 bytes header
-            int smLen = displayLen - hdrSize;
-            if (smLen >= SM_ENCRYPTED_SIZE) {
-                // Log the exact bytes being passed to SM decrypt for debugging
-                {
-                    char smHex[128];
-                    int sp = 0;
-                    int sblen = smLen > 22 ? 22 : smLen;
-                    for (int j = 0; j < sblen && sp < (int)sizeof(smHex) - 4; ++j)
-                        sp += snprintf(smHex + sp, sizeof(smHex) - sp, "%02X ", (unsigned char)displayBuf[hdrSize+j]);
-                    Logger::Log("SMOD", "SM input bytes (%d): [%s]", smLen, smHex);
-                }
-
-                uint8_t decrypted[256];
-                bool decryptedOk = false;
-
-                int decLen = SimpleModulusCipher::Decrypt(decrypted, displayBuf + hdrSize, smLen);
-                if (decLen > 0) {
-                    decryptedOk = true;
-                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt: OK decLen=%d", decLen);
-                } else {
-                    Logger::Log("PACKETSNIFFER", "SEND C3 decrypt: FAILED (decLen=%d)", decLen);
-                }
-
-                if (decryptedOk) {
-                    // C3/C4 SM decrypt format:
-                    //   stream[0] = decKey (encryption key byte, not part of payload)
-                    //   stream[1..validTotal-1] = C1/C2 payload (plaintext)
-                    //
-                    // BlackRock NÃO usa XOR C1C2 (tabela 0xE7,0x6D...):
-                    //   - Evidência: C1 direto "C1 08 D4 02" (movimento) aparece com
-                    //     opcode D4 após Layer-1 decrypt. Se XOR C1C2 fosse usado,
-                    //     D4 seria codificado para 8A (calculado via Python).
-                    //   - Evidência: C3 decrypt sem XOR dá opcode 0x19 (attack) correto.
-                    //   - Evidência: MuProxy define EnableXorDecode=false por padrão.
-                    //   - MuEncDec.DecodeC3C4 chama DecodeC1C2InPlace, mas isso é
-                    //     desabilitado via DisableC1C2Xor=true no BlackRock.
-                    //   - XorFilter (tabela 0xAB,0x11...) = Camada 2: NÃO usado no
-                    //     caminho C3C4 (que usa SimpleModulus), MAS usado nos pacotes
-                    //     de ataque C1 0x11 (ver PacketInjector::Inject / RE validada).
-                    //
-                    // Reconstruct: C3→C1, C4→C2
-                    //   innerPkt = [C1/C2] [size] [stream[1]] ... [stream[validTotal-1]]
-
-                    uint8_t hdr = (uint8_t)displayBuf[0];
-                    uint8_t innerHdr = (hdr == 0xC4) ? 0xC2 : 0xC1;
-                    int innerHdrSize = (innerHdr == 0xC2) ? 3 : 2;
-                    int contentBytes = decLen - 1;  // skip decKey byte
-                    int innerTotalSize = innerHdrSize + contentBytes;
-
-                    if (contentBytes > 0) {
-                        uint8_t innerPkt[256];
-                        int pos = 0;
-                        innerPkt[pos++] = innerHdr;
-                        if (innerHdrSize == 2) {
-                            innerPkt[pos++] = (uint8_t)innerTotalSize;
-                        } else {
-                            innerPkt[pos++] = (uint8_t)((innerTotalSize >> 8) & 0xFF);
-                            innerPkt[pos++] = (uint8_t)(innerTotalSize & 0xFF);
-                        }
-                        // Copy stream[1..] as payload (skip decKey at stream[0])
-                        memcpy(innerPkt + pos, decrypted + 1, contentBytes);
-
-                        // Log the decoded C1/C2 packet
-                        char decHex[256];
-                        int dp = 0;
-                        for (int j = 0; j < innerTotalSize && dp < (int)sizeof(decHex) - 4; ++j)
-                            dp += snprintf(decHex + dp, sizeof(decHex) - dp, "%02X ", innerPkt[j]);
-                        Logger::Log("PACKETSNIFFER", "SEND %s decoded: [%s] dk=%02X",
-                            (innerHdr == 0xC2) ? "C4>C2" : "C3>C1", decHex, decrypted[0]);
-                    } else {
-                        Logger::Log("PACKETSNIFFER", "SEND C3 decrypt: empty payload (decLen=%d)", decLen);
-                    }
-                }
-            }
+        if (isGS) {
+            C3Decoder::LogDecoded(displayBuf, displayLen);
         }
 
         if (g_PacketObserver) g_PacketObserver("SEND", s, buf, len);
@@ -366,7 +188,7 @@ static int WINAPI HookWSASend(SOCKET s, LPWSABUF buffers, DWORD bufferCount,
                 Logger::Log("PACKETSNIFFER", "WSASend: %d bytes [%s]", buffers[i].len, hex);
                 uintptr_t* callerEbp;
                 __asm { mov callerEbp, ebp }
-                LogStackTrace("WSASend stack", callerEbp);
+                StackTrace::Log("WSASend stack", callerEbp);
                 if (g_PacketObserver) g_PacketObserver("SEND", s, buffers[i].buf, buffers[i].len);
             }
         }
@@ -479,9 +301,9 @@ static int WINAPI HookConnect(SOCKET s, const sockaddr* name, int namelen)
         Logger::Log("PACKETSNIFFER", "CONNECT to %s:%d", ip, port);
 
         // Rastreia socket do game server para injects
-        if (IsGameServerPort(port))
+        if (GameServerConnection::IsGameServerPort(port))
         {
-            g_GameServerSocket = s;
+            GameServerConnection::SetSocket(s);
             Logger::Log("PACKETSNIFFER", "Game server socket rastreado: %d", (int)s);
         }
 
@@ -503,9 +325,9 @@ static int WINAPI HookWSAConnect(SOCKET s, const sockaddr* name, int namelen,
         Logger::Log("PACKETSNIFFER", "WSACONNECT to %s:%d", ip, port);
 
         // Rastreia socket do game server para injects
-        if (IsGameServerPort(port))
+        if (GameServerConnection::IsGameServerPort(port))
         {
-            g_GameServerSocket = s;
+            GameServerConnection::SetSocket(s);
             Logger::Log("PACKETSNIFFER", "Game server socket rastreado: %d", (int)s);
         }
 
@@ -658,42 +480,7 @@ void Uninstall()
     }
     g_HookCount = 0;
 
-    g_GameServerSocket = INVALID_SOCKET;
-}
-
-// ============================================================================
-// SendToGameServer — envia bytes JÁ CIFRADOS no socket do game server.
-// É o transporte do PacketInjector (o módulo dono do socket e do send
-// original). O socket do jogo está conectado ao MuProxy2, que faz relay puro
-// para o GS real.
-// ============================================================================
-bool SendToGameServer(const uint8_t* data, int len)
-{
-    if (!data || len <= 0) return false;
-    if (g_GameServerSocket == INVALID_SOCKET) {
-        Logger::Log("PACKETSNIFFER", "InjectToServer: GS socket nao rastreado");
-        return false;
-    }
-
-    // Verifica se o socket ainda esta vivo (nao foi fechado pelo jogo)
-    int optval = 0;
-    int optlen = sizeof(optval);
-    if (getsockopt(g_GameServerSocket, SOL_SOCKET, SO_ERROR, (char*)&optval, &optlen) == SOCKET_ERROR || optval != 0) {
-        Logger::Log("PACKETSNIFFER", "InjectToServer: socket invalido (err=%d), limpando", optval);
-        g_GameServerSocket = INVALID_SOCKET;
-        return false;
-    }
-
-    int sent = TrueSend ? TrueSend(g_GameServerSocket, (const char*)data, len, 0)
-                        : send(g_GameServerSocket, (const char*)data, len, 0);
-    if (sent == SOCKET_ERROR) {
-        int err = WSAGetLastError();
-        Logger::Log("PACKETSNIFFER", "InjectToServer: send error %d - socket morto, limpando", err);
-        g_GameServerSocket = INVALID_SOCKET;
-        return false;
-    }
-
-    return true;
+    GameServerConnection::SetSocket(INVALID_SOCKET);
 }
 
 } // namespace WinsockHooks

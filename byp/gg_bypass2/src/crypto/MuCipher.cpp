@@ -1,7 +1,7 @@
 #include "sdk.h"
 #include "MuCipher.h"
 #include "Logger.h"
-#include "GameMemory.h"
+#include "GameMemory/Globals.h"
 
 namespace MuCipher {
 

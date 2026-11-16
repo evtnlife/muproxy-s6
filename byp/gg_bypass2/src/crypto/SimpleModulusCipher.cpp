@@ -1,6 +1,6 @@
 #include "sdk.h"
 #include "SimpleModulusCipher.h"
-#include "GameMemory.h"
+#include "GameMemory/Globals.h"
 #include "Logger.h"
 #include <cstring>
 #include <cstdio>

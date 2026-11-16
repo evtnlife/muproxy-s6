@@ -22,7 +22,13 @@ echo Compilando gg_bypass2.dll...
 if not exist build mkdir build
 if not exist ..\dist mkdir ..\dist
 
-set SOURCES=src\core\dllmain.cpp src\core\Logger.cpp src\core\InlineHook.cpp src\core\OriginalApi.cpp src\crypto\MuCipher.cpp src\crypto\SimpleModulusCipher.cpp src\net\CommandChannel.cpp src\net\PacketChannel.cpp src\net\winsock\WinsockHooks.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\game\GameMemory.cpp src\game\MonsterTracker.cpp src\game\ViewportMap.cpp src\game\SkillMap.cpp src\game\SkillHook.cpp src\attack\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp
+set SOURCES=
+set SOURCES=%SOURCES% src\core\dllmain.cpp src\core\Logger.cpp src\core\InlineHook.cpp src\core\OriginalApi.cpp src\core\StackTrace.cpp
+set SOURCES=%SOURCES% src\crypto\MuCipher.cpp src\crypto\SimpleModulusCipher.cpp src\crypto\C3Decoder.cpp
+set SOURCES=%SOURCES% src\net\CommandChannel.cpp src\net\PacketChannel.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\net\winsock\WinsockHooks.cpp
+set SOURCES=%SOURCES% src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\packets\GameServerConnection.cpp
+set SOURCES=%SOURCES% src\game\GameMemory\Globals.cpp src\game\GameMemory\Object.cpp src\game\GameMemory\Player.cpp src\game\MonsterTracker.cpp src\game\ViewportMap.cpp src\game\SkillMap.cpp src\game\SkillHook.cpp
+set SOURCES=%SOURCES% src\attack\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp
 
 cl.exe /nologo /O2 /LD /MD /W3 /Isrc\include %SOURCES% /Fobuild\ /link /DEF:src\Main.def /OUT:..\dist\byp.dll /MACHINE:X86 /OPT:REF /OPT:ICF
 
