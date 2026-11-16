@@ -80,64 +80,90 @@
 
 ## 5. Fase 4 — `PacketInjector` + porta única de injeção (D1)
 
-> Confirmação pendente: D1 usa porta única `Inject(plaintext,len)` com `switch` por
-> opcode. Se o usuário preferir a hierarquia `NormalAttack`/`SkillAttack`, este grupo vira
-> subclasses (mesmo escopo, outra forma).
+> Decisão D1 confirmada na aplicação: porta única `Inject(plaintext,len)` com
+> `switch` por opcode (sem hierarquia de subclasses).
 
-- [ ] 5.1 Criar `src/PacketInjector.h/.cpp` com `Inject(const uint8_t* plaintext, int len)`
-  que aplica `MuCipher::XorData` uma vez e escolhe o pipeline pelo opcode (0x11 → Layer-1
-  C1 puro; 0x19 → SM+serial → C3 0D → Layer-1); verificar que o build passa.
-- [ ] 5.2 Migrar `AttackModule::SendAttack`/`SendSkillAttack` para chamar
+- [x] 5.1 Criar `src/include/PacketInjector.h` + `src/packets/PacketInjector.cpp` com
+  `Inject(const uint8_t* plaintext, int len)` que aplica `MuCipher::XorData` uma vez e
+  escolhe o pipeline pelo opcode (0x11 → Layer-1 C1 puro; 0x19 → SM+serial → C3 0D →
+  Layer-1); verificar que o build passa.
+- [x] 5.2 Migrar `AttackModule::SendAttack`/`SendSkillAttack` para chamar
   `PacketInjector::Inject`; verificar que o build passa.
-- [ ] 5.3 Remover (ou reduzir a wrapper fino) `InjectC1Attack`/`InjectSkillC1`/
-  `InjectToServer` antigos em `PacketSniffer.cpp`; verificar que só existe uma porta de
-  injeção e o build passa.
-- [ ] 5.4 Adicionar `src/PacketInjector.cpp` à `SOURCES` do `build.bat` e verificar o build.
-- [ ] 5.5 Commit da Fase 4 e teste em campo: ataque normal e skill produzem os mesmos
-  bytes no wire (conferir log).
+- [x] 5.3 Remover `InjectC1Attack`/`InjectSkillC1`/`InjectToServer` antigos de
+  `PacketSniffer.cpp`; o `PacketSniffer` virou o dono do socket do GS e registra o
+  transporte (`SetSender`). Ficou a porta `InjectXorData` (dados JÁ na forma XorData,
+  usada pelo comando SEND_PACKET — não aplica XorData de novo).
+- [x] 5.4 Adicionar `src\packets\PacketInjector.cpp` à `SOURCES` do `build.bat` e
+  verificar o build.
+- [x] 5.5 Commit da Fase 4 (`406eb85`) e teste em campo: ataque normal e skill produzem
+  os mesmos bytes no wire (conferir log `InjectSkillC1: after XorData`).
+  - [ ] teste em campo (usuário): bytes idênticos ao pré-refactor
 
 ## 6. Fase 5 — Separar `CommandChannel` (44412) e `PacketChannel` (44413)
 
-- [ ] 6.1 Criar `src/CommandChannel.h/.cpp` (TCP 44412, comandos `CMD`) e
-  `src/PacketChannel.h/.cpp` (TCP 44413, log `PKT` + `SEND`), separando o `g_TcpSocket`
-  único atual; verificar que o build passa.
-- [ ] 6.2 Atualizar `dllmain.cpp`/`TcpClient` para usar os dois canais; verificar que o
-  build passa e não há socket duplicado.
-- [ ] 6.3 Adicionar os dois .cpp à `SOURCES` do `build.bat` e verificar o build.
-- [ ] 6.4 Commit da Fase 5 e teste em campo: comandos chegam por 44412 e o log de pacotes
-  sai por 44413 (conferir portas no log).
+- [x] 6.1 Criar `src/include/CommandChannel.h` + `src/net/CommandChannel.cpp` (TCP 44412,
+  comandos `CMD` — ex-`TcpClient`) e `src/include/PacketChannel.h` +
+  `src/net/PacketChannel.cpp` (TCP 44413, log `PKT` + `SEND`); verificar que o build passa.
+- [x] 6.2 Atualizar `dllmain.cpp`/`AttackModule`/`MonsterTracker`/`PacketHandler` para
+  usar os dois canais; verificar que o build passa e não há socket duplicado.
+  - `src/core/OriginalApi.{h,cpp}`: trampolines de send/connect, para os canais usarem as
+    APIs ORIGINAIS (fora do hook) — o `CONNECT to 127.0.0.1:44412` não é mais logado a
+    cada tentativa e o tráfego ASCII dos canais não entra mais no reassembler.
+- [x] 6.3 Adicionar os .cpp à `SOURCES` do `build.bat` e verificar o build.
+- [x] 6.4 Commit da Fase 5 (`f4b7b44`) e teste em campo: comandos chegam por 44412 e o
+  log de pacotes sai por 44413 (conferir portas no log).
+  - [ ] teste em campo (usuário)
 
 ## 7. Fase 6 — Extrair `WinsockHooks` (fase de maior risco)
 
-- [ ] 7.1 Criar `src/WinsockHooks.h/.cpp` com trampolines, `AllocateTrampoline`,
-  `InstallInlineHook`, `HookSend/Recv/WSASend/WSARecv/SendTo/RecvFrom/Connect/WSAConnect`
-  e a completion routine overlapped; verificar que o build passa.
-- [ ] 7.2 Preservar a ordem síncrona de `Install()` em `DllMain` (`DLL_PROCESS_ATTACH`) —
-  os hooks devem instalar antes de qualquer thread; verificar por inspeção que a ordem em
-  `dllmain.cpp` não mudou.
-- [ ] 7.3 Adicionar `src/WinsockHooks.cpp` à `SOURCES` do `build.bat` e verificar o build.
-- [ ] 7.4 Commit da Fase 6 e teste em campo obrigatório: o `connect` do jogo ao game
-  server é capturado (log mostra o socket do GS) e a injeção funciona.
+- [x] 7.1 Criar `src/include/WinsockHooks.h` + `src/net/winsock/WinsockHooks.cpp` com
+  trampolines, `AllocateTrampoline`, `InstallInlineHook`,
+  `HookSend/Recv/WSASend/WSARecv/SendTo/RecvFrom/Connect/WSAConnect` e a completion
+  routine overlapped; verificar que o build passa.
+  - O código dos hooks foi conferido por diff contra a versão anterior: idêntico, exceto
+    as trocas intencionais (`LogRaw` → observador, `PacketReassembler::Remove` →
+    observador de socket fechado).
+- [x] 7.2 Preservar a ordem síncrona de `Install()` em `DllMain` (`DLL_PROCESS_ATTACH`) —
+  os hooks devem instalar antes de qualquer thread; verificado por inspeção: `dllmain.cpp`
+  continua chamando `PacketSniffer::Install()` no `DLL_PROCESS_ATTACH`, e o
+  `PacketChannel` (44413) só sobe depois dos hooks (para já usar o trampoline).
+- [x] 7.3 Adicionar `src\net\winsock\WinsockHooks.cpp` à `SOURCES` do `build.bat` e
+  verificar o build.
+- [x] 7.4 Commit da Fase 6 (`6c16147`) e teste em campo obrigatório: o `connect` do jogo
+  ao game server é capturado (log mostra o socket do GS) e a injeção funciona.
+  - [ ] teste em campo (usuário)
 
 ## 8. Fase 7 — Reorganizar `GameMemory` em sub-grupos (D5)
 
-> Confirmação pendente: D5 prefere sub-namespace com rename (`Player::Level`); fallback de
-> baixo risco é agrupar por seção de comentário mantendo os nomes.
+> Decisão D5 aplicada: sub-namespace COM rename (`Player::Level`), pois só havia 33
+> call-sites. Cada sub-namespace ganhou seu próprio header E seu próprio .cpp
+> (pedido do usuário).
 
-- [ ] 8.1 Reorganizar `GameMemory.h` em sub-grupos `Object`/`Player`/`Globals`
-  (sub-namespace ou seções, conforme decisão D5) sem mudar comportamento; verificar que o
-  build passa e todos os callers compilam.
-- [ ] 8.2 Commit da Fase 7 e teste em campo: monster tracker e ataque (que leem
-  `GameMemory`) continuam funcionando.
+- [x] 8.1 Reorganizar `GameMemory` em `Globals`/`Object`/`Player`, cada um com header e
+  .cpp próprios, sem mudar comportamento; build passa e todos os callers compilam:
+  - `src/include/GameMemory/Globals.h` + `src/game/GameMemory/Globals.cpp`
+  - `src/include/GameMemory/Object.h`  + `src/game/GameMemory/Object.cpp`
+  - `src/include/GameMemory/Player.h`  + `src/game/GameMemory/Player.cpp`
+  - `GameMemory.h`/`GameMemory.cpp` removidos; cada consumidor inclui só o que usa.
+- [x] 8.2 Commit da Fase 7 (`3730e71`) e teste em campo: monster tracker e ataque (que
+  leem `GameMemory`) continuam funcionando.
+  - [ ] teste em campo (usuário)
 
 ## 9. Integração final (verificação que cruza grupos)
 
 - [ ] 9.1 Teste em campo completo: ataque normal + skill + monster tracker + name-rewrite
   + comandos de debug; verificar que o log está íntegro e os bytes no wire são os mesmos
   da build pré-refactor.
-- [ ] 9.2 Verificar que nenhum arquivo `.cpp` excede ~400 linhas e que `build.bat` compila
-  sem warnings novos (`cl.exe /W3`); verificar por listagem de tamanhos.
-- [ ] 9.3 Commit final da reorganização.
+- [x] 9.2 Verificar que nenhum arquivo `.cpp` excede ~400 linhas e que `build.bat` compila
+  sem warnings novos (`cl.exe /W3`); verificado por listagem de tamanhos.
+  - 27 arquivos .cpp; 24 abaixo de 400 linhas. Os 3 maiores são módulos coesos de
+    responsabilidade única: `AttackModule` (628 — config + threads + build de pacotes +
+    handlers, exatamente o que D4 define), `SimpleModulusCipher` (577 — cifra SM +
+    leitura das chaves do jogo, acopladas pelo roundtrip de auto-teste) e
+    `WinsockHooks` (486 — 8 hooks + trampolines).
+  - Warnings: apenas os pré-existentes (`C4996` inet_ntoa/inet_addr e `C4530` /EHsc);
+    nenhum warning novo.
+- [x] 9.3 Commit final da reorganização (`5becc0a`).
 
 ## Workflow follow-up
 

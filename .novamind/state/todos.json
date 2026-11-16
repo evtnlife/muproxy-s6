@@ -1,34 +1,42 @@
 [
   {
-    "content": "Fase 1 (MuCipher): build + commit (c92afdc) — teste em campo pendente do usuário",
+    "content": "Fase 1 (MuCipher): build + commit (c92afdc)",
     "status": "completed"
   },
   {
-    "content": "Fase 2: DebugTools extraído do AttackModule + comandos registrados + build + commit (de2c6f8)",
+    "content": "Fase 2: DebugTools extraído do AttackModule + comandos (de2c6f8)",
     "status": "completed"
   },
   {
-    "content": "Fase 3: NameRewriter + PacketReassembler + build + commit",
-    "status": "in_progress"
+    "content": "Fase 3: NameRewriter + PacketReassembler (49f42fb)",
+    "status": "completed"
   },
   {
-    "content": "Fase 4: PacketInjector (porta única por opcode) + build + commit",
-    "status": "pending"
+    "content": "Reorganização de pastas por domínio (eb7708d)",
+    "status": "completed"
   },
   {
-    "content": "Fase 5: CommandChannel (44412) + PacketChannel (44413) + build + commit",
-    "status": "pending"
+    "content": "Fase 4: PacketInjector porta única (406eb85)",
+    "status": "completed"
   },
   {
-    "content": "Fase 6: WinsockHooks + preservar ordem em DllMain + build + commit",
-    "status": "pending"
+    "content": "Fase 5: CommandChannel + PacketChannel (f4b7b44)",
+    "status": "completed"
   },
   {
-    "content": "Fase 7: GameMemory em sub-grupos + build + commit",
-    "status": "pending"
+    "content": "Fase 6: WinsockHooks (6c16147)",
+    "status": "completed"
   },
   {
-    "content": "Atualizar tasks.md com o que foi concluído (checkboxes)",
+    "content": "Fase 7: GameMemory em sub-namespaces (3730e71)",
+    "status": "completed"
+  },
+  {
+    "content": "Integração final: GameMemory por arquivo + módulos extraídos (5becc0a) + tasks.md",
+    "status": "completed"
+  },
+  {
+    "content": "Pendente do usuário: teste em campo (9.1) e arquivar o change",
     "status": "pending"
   }
 ]
