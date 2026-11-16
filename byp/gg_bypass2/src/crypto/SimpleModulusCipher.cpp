@@ -35,7 +35,7 @@ static int g_initCount = 0;  // limit verbose logging to first init only
 bool SimpleModulusCipher::Initialize() {
     if (m_initialized) return true;
     
-    uintptr_t base = GameMemory::GetMainBase();
+    uintptr_t base = GameMemory::Globals::MainBase();
     if (!base) {
         Logger::Log("SMOD", "Initialize FAILED: GetMainBase() returned 0");
         return false;
@@ -188,7 +188,7 @@ int SimpleModulusCipher::Encrypt(void* dest, const void* source, int size) {
 // Usa o objeto global em 0x8797778 — 100% identico ao jogo
 // ============================================================================
 int SimpleModulusCipher::NativeEncrypt(void* dest, const void* source, int size) {
-    uintptr_t base = GameMemory::GetMainBase();
+    uintptr_t base = GameMemory::Globals::MainBase();
     if (!base) return -1;
     
     uintptr_t smObj = base + SM_OBJECT_OFFSET;  // 0x8797778
@@ -473,7 +473,7 @@ int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
             m, finale[1], finale[0]);
         
         // Re-read SM Object keys from memory and compare against cached keys
-        uintptr_t base = GameMemory::GetMainBase();
+        uintptr_t base = GameMemory::Globals::MainBase();
         if (base) {
             uintptr_t obj = base + SM_OBJECT_OFFSET;
             __try {

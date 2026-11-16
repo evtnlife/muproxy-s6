@@ -24,7 +24,7 @@ namespace DebugTools {
 // Escaneia TODOS os slots (mesmo vazios) em busca do valor exato.
 // ============================================================================
 void ScanForValue(uint16_t searchValue) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) {
         Logger::Log("ATTACK", "SCANVALUE: ObjectArray null!");
         return;
@@ -44,7 +44,7 @@ void ScanForValue(uint16_t searchValue) {
                 BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
                 WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
                 char name[64] = {};
-                GameMemory::GetName(i, name, sizeof(name));
+                GameMemory::Object::Name(i, name, sizeof(name));
 
                 if (foundInSlot == 0) {
                     Logger::Log("ATTACK", "  [S %3d] t=%d l=%d idx=0x%04X name='%s' — FOUND 0x%04X at:",
@@ -85,7 +85,7 @@ void ScanForValue(uint16_t searchValue) {
                     BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
                     WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
                     char name[64] = {};
-                    GameMemory::GetName(i, name, sizeof(name));
+                    GameMemory::Object::Name(i, name, sizeof(name));
                     Logger::Log("ATTACK", "  [S %3d] t=%d l=%d idx=0x%04X name='%s' — NEAR:",
                                 i, type, live, compIndex, name);
                 }
@@ -104,7 +104,7 @@ void ScanForValue(uint16_t searchValue) {
 // SCANSLOT: busca um valor WORD em UM slot específico (hex dump + busca)
 // ============================================================================
 void ScanSlotForValue(int slotIndex, uint16_t searchValue) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) {
         Logger::Log("ATTACK", "SCANSLOT: ObjectArray null!");
         return;
@@ -119,7 +119,7 @@ void ScanSlotForValue(int slotIndex, uint16_t searchValue) {
     BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
     WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
     char name[64] = {};
-    GameMemory::GetName(slotIndex, name, sizeof(name));
+    GameMemory::Object::Name(slotIndex, name, sizeof(name));
 
     Logger::Log("ATTACK", "==== SCANSLOT slot=%d type=%d live=%d idx=0x%04X name='%s' search=0x%04X ====",
                 slotIndex, type, live, compIndex, name, searchValue);
@@ -145,10 +145,10 @@ void ScanSlotForValue(int slotIndex, uint16_t searchValue) {
 // em offsets candidatos no objeto do jogador local.
 // ============================================================================
 void DirScan() {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+    uintptr_t localPlayer = GameMemory::Player::Object();
     if (!localPlayer) {
         Logger::Log("ATTACK", "DIRSCAN: localPlayer null! Tentando ObjectArray...");
-        uintptr_t arrayBase2 = GameMemory::GetObjectArray();
+        uintptr_t arrayBase2 = GameMemory::Object::Array();
         if (!arrayBase2) {
             Logger::Log("ATTACK", "DIRSCAN: ObjectArray tambem null!");
             return;
@@ -173,7 +173,7 @@ void DirScan() {
     WORD compIndex = SafeReadWord(localPlayer + GameObject::OFF_INDEX);
     char name[64] = {};
     // Busca slot index para getName
-    uintptr_t arrayBase2 = GameMemory::GetObjectArray();
+    uintptr_t arrayBase2 = GameMemory::Object::Array();
     int playerSlot = -1;
     for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
         if ((arrayBase2 + i * GameAddresses::OBJECT_SIZE) == localPlayer) {
@@ -182,7 +182,7 @@ void DirScan() {
         }
     }
     if (playerSlot >= 0) {
-        GameMemory::GetName(playerSlot, name, sizeof(name));
+        GameMemory::Object::Name(playerSlot, name, sizeof(name));
     }
 
     Logger::Log("ATTACK", "==== DIRSCAN player=0x%p idx=0x%04X slot=%d name='%s' ====",

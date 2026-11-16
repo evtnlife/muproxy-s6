@@ -50,7 +50,7 @@ static bool ParseFloatParam(const char* s, const char* key, float* outVal) {
 
 // Calcula distância euclidiana entre local player e coordenadas
 static float DistanceToLocal(float tx, float ty) {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+    uintptr_t localPlayer = GameMemory::Player::Object();
     if (!localPlayer) return 0.0f;
 
     float lx = *(float*)(localPlayer + GameObject::OFF_X);
@@ -73,7 +73,7 @@ static bool MatchesFilter(uint8_t objType, int filterMask) {
 // filterMask: bitmask de tipos para incluir (0 = todos)
 // maxRange: distância máxima do local player (0 = sem limite)
 void SendFullListFiltered(int filterMask, float maxRange) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) {
         Logger::Log("MONSTER", "Array de objetos nao disponivel");
         return;

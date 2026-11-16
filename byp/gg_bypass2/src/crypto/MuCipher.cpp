@@ -7,7 +7,7 @@ namespace MuCipher {
 
 static HMODULE GetMainDllModule()
 {
-    return (HMODULE)GameMemory::GetMainDllBase();
+    return (HMODULE)GameMemory::Globals::MainDllBase();
 }
 
 bool GetGameServerKeys(unsigned char* xorKey, unsigned char* subKey)

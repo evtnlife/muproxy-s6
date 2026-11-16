@@ -12,84 +12,66 @@
 //
 // Toda a comunicação com a memória do processo passa por aqui.
 // Endereços base são relativos ao módulo main.exe e resolvidos em runtime.
+//
+// Organizado em três grupos (D5):
+//   Globals — bases dos módulos e valores globais do main.exe
+//   Object  — objetos do viewport (ObjectPreview) e o ObjectManager
+//   Player  — jogador local (objeto do viewport + Character/UserObject)
 // ============================================================================
 
 namespace GameMemory {
 
+// ============================================================================
+// Globals — bases dos módulos e globals do main.exe
+// ============================================================================
+namespace Globals {
+
 // Resolve base do main.exe (cache interno)
-uintptr_t GetMainBase();
+uintptr_t MainBase();
 
 // Resolve base do Main.dll (cache interno)
-uintptr_t GetMainDllBase();
+uintptr_t MainDllBase();
 
-// Retorna ponteiro para o Object Manager (ou null)
-uintptr_t GetObjectManager();
-
-// Retorna ponteiro para o array de objetos (ou null)
-uintptr_t GetObjectArray();
-
-// Retorna ponteiro para o objeto no index (ou null se inválido)
-uintptr_t GetObjectByIndex(int index);
-
-// Retorna ponteiro para o local player (ou null)
-uintptr_t GetLocalPlayer();
-
-// Retorna ponteiro para a estrutura do personagem (ou null)
-// Endereço: main.exe + GameAddresses::CHARACTER_PTR (struct direta)
-// Contém: nome, classe, skills. NÃO contém level/stats.
-uintptr_t GetCharacter();
-
-// Retorna ponteiro para a estrutura de stats do personagem (ou null)
-// Endereço: *(main.exe + GameAddresses::USER_OBJECT_PTR) (ponteiro indireto)
-// Contém: nome, level, stats (STR/AGI/VIT/ENE)
-uintptr_t GetUserObject();
-
-// Define o index do jogador local (recebido do proxy via D4)
-// Quando definido, GetLocalPlayer() busca por type==1 && index==playerIndex
-void SetLocalPlayerIndex(uint16_t index);
-uint16_t GetLocalPlayerIndex();
-
-// ---- Leitura tipada inline ----
-
-inline BYTE GetType(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(BYTE*)(obj + GameObject::OFF_TYPE) : 0;
+// Número do mapa atual
+inline DWORD MapNumber() {
+    uintptr_t base = MainBase();
+    return base ? *(DWORD*)(base + GameAddresses::MAP_NUMBER) : 0;
 }
 
-inline BYTE IsLive(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(BYTE*)(obj + GameObject::OFF_ISLIVE) : 0;
+// Índice de entidade do alvo atual (global 0x081C03A4).
+// O jogo grava o alvo aqui quando o jogador clica num monstro — é o que o
+// jogo coloca direto no pacote de skill attack (sem XOR).
+// NOTE: 0x081C03A4 é um endereço ABSOLUTO em main.exe, não um RVA.
+inline uint16_t TargetEntityIndex() {
+    uintptr_t addr = GameAddresses::TARGET_ENTITY_INDEX_GLOBAL;
+    return addr ? *(uint16_t*)addr : 0;
 }
 
-inline float GetX(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(float*)(obj + GameObject::OFF_X) : 0.0f;
+// Índice de slot do alvo atual (global 0x081C03A0). -1 = nenhum alvo.
+inline int32_t TargetSlotIndex() {
+    uintptr_t addr = GameAddresses::TARGET_SLOT_GLOBAL;
+    return addr ? *(int32_t*)addr : -1;
 }
 
-inline float GetY(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(float*)(obj + GameObject::OFF_Y) : 0.0f;
-}
+} // namespace Globals
 
-inline float GetZ(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(float*)(obj + GameObject::OFF_Z) : 0.0f;
-}
+// ============================================================================
+// Object — objetos do viewport (ObjectPreview) e o ObjectManager
+// ============================================================================
+namespace Object {
 
-inline WORD GetCompositeIndex(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(WORD*)(obj + GameObject::OFF_INDEX) : 0;
-}
+// Ponteiro para o Object Manager (ou null)
+uintptr_t Manager();
 
-// Retorna o OFF_ID (0x84) do objeto no slot — pode ser diferente do composite index
-inline uint16_t GetObjectId(int index) {
-    uintptr_t obj = GetObjectByIndex(index);
-    return obj ? *(WORD*)(obj + GameObject::OFF_ID) : 0;
-}
+// Ponteiro para o array de objetos (ou null)
+uintptr_t Array();
+
+// Ponteiro para o objeto no index (ou null se inválido)
+uintptr_t ByIndex(int index);
 
 // Busca objeto pelo entity index (OFF_INDEX) — varre o array
-inline uintptr_t FindObjectByEntityIndex(uint16_t entityIndex) {
-    uintptr_t arrayBase = GetObjectArray();
+inline uintptr_t FindByEntityIndex(uint16_t entityIndex) {
+    uintptr_t arrayBase = Array();
     if (!arrayBase) return 0;
     for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
         uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
@@ -99,124 +81,47 @@ inline uintptr_t FindObjectByEntityIndex(uint16_t entityIndex) {
     return 0;
 }
 
-// AttackTargetID = EntityIndex XOR 0xEFF5
-inline uint16_t EntityToAttackId(uint16_t entityIndex) {
-    return entityIndex ^ 0xEFF5;
+// ---- Leitura tipada inline ----
+
+inline BYTE Type(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(BYTE*)(obj + GameObject::OFF_TYPE) : 0;
 }
 
-// Read the game's current target entity index from global 0x081C03A4
-// The game stores the target here when the player clicks on a monster.
-// This is what the game puts directly in skill attack packets (no XOR).
-// NOTE: 0x081C03A4 is an ABSOLUTE address in main.exe, NOT an RVA.
-inline uint16_t GetTargetGlobal() {
-    uintptr_t addr = GameAddresses::TARGET_ENTITY_INDEX_GLOBAL;
-    return addr ? *(uint16_t*)addr : 0;
+inline BYTE IsLive(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(BYTE*)(obj + GameObject::OFF_ISLIVE) : 0;
 }
 
-// Read the game's current target slot index from global 0x081C03A0
-// -1 means no target selected
-inline int32_t GetTargetSlotGlobal() {
-    uintptr_t addr = GameAddresses::TARGET_SLOT_GLOBAL;
-    return addr ? *(int32_t*)addr : -1;
+inline float X(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(float*)(obj + GameObject::OFF_X) : 0.0f;
 }
 
-// Level do personagem local (da UserObjectStruct)
-inline WORD GetPlayerLevel() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LEVEL) : 0;
+inline float Y(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(float*)(obj + GameObject::OFF_Y) : 0.0f;
 }
 
-// Stats do personagem local (da UserObjectStruct)
-inline WORD GetPlayerStr() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_STR) : 0;
-}
-inline WORD GetPlayerAgi() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_AGI) : 0;
-}
-inline WORD GetPlayerVit() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_VIT) : 0;
-}
-inline WORD GetPlayerEne() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_ENE) : 0;
-}
-inline WORD GetPlayerLife() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LIFE) : 0;
-}
-inline WORD GetPlayerMaxLife() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXLIFE) : 0;
-}
-inline WORD GetPlayerMana() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MANA) : 0;
-}
-inline WORD GetPlayerMaxMana() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXMANA) : 0;
-}
-inline WORD GetPlayerShield() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_SHIELD) : 0;
-}
-inline WORD GetPlayerMaxShield() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXSHIELD) : 0;
-}
-inline WORD GetPlayerAttackSpeed() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_ATTACKSPEED) : 0;
-}
-inline WORD GetPlayerDamageMin() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_DAMAGEMIN) : 0;
-}
-inline WORD GetPlayerDamageMax() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_DAMAGEMAX) : 0;
-}
-inline WORD GetPlayerLevelPoint() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LEVELPOINT) : 0;
-}
-inline DWORD GetPlayerExp() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_EXP) : 0;
-}
-inline DWORD GetPlayerNextExp() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_NEXTEXP) : 0;
-}
-inline DWORD GetPlayerMoney() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_MONEY_INV) : 0;
-}
-inline BYTE GetPlayerClass() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(BYTE*)(uo + UserObjectStruct::OFF_CLASS) : 0;
-}
-inline WORD GetPlayerMagicCount() {
-    uintptr_t uo = GetUserObject();
-    return uo ? *(BYTE*)(uo + UserObjectStruct::OFF_MAGICCOUNT) : 0;
-}
-// Retorna ponteiro para a lista de magias (WORD[650])
-inline uintptr_t GetPlayerMagicList() {
-    uintptr_t uo = GetUserObject();
-    return uo ? (uo + UserObjectStruct::OFF_MAGICLIST) : 0;
-}
-// Retorna ponteiro para um item do equipamento (slot 0-11)
-inline uintptr_t GetPlayerEquipment(int slot) {
-    if (slot < 0 || slot > 11) return 0;
-    uintptr_t uo = GetUserObject();
-    return uo ? (uo + UserObjectStruct::OFF_EQUIPMENT + slot * UserObjectStruct::ITEM_SIZE) : 0;
+inline float Z(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(float*)(obj + GameObject::OFF_Z) : 0.0f;
 }
 
-inline int GetName(int index, char* buf, int maxLen) {
-    uintptr_t obj = GetObjectByIndex(index);
+inline WORD CompositeIndex(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(WORD*)(obj + GameObject::OFF_INDEX) : 0;
+}
+
+// Retorna o OFF_ID (0x84) do objeto no slot — pode ser diferente do composite index
+inline uint16_t Id(int index) {
+    uintptr_t obj = ByIndex(index);
+    return obj ? *(WORD*)(obj + GameObject::OFF_ID) : 0;
+}
+
+// Nome do objeto no slot
+inline int Name(int index, char* buf, int maxLen) {
+    uintptr_t obj = ByIndex(index);
     if (!obj || maxLen <= 0) { if (buf && maxLen > 0) buf[0] = '\0'; return 0; }
     const char* src = (const char*)(obj + GameObject::OFF_NAME);
     int i;
@@ -225,9 +130,133 @@ inline int GetName(int index, char* buf, int maxLen) {
     return i;
 }
 
-inline DWORD GetMapNumber() {
-    uintptr_t base = GetMainBase();
-    return base ? *(DWORD*)(base + GameAddresses::MAP_NUMBER) : 0;
+// AttackTargetID = EntityIndex XOR 0xEFF5
+inline uint16_t ToAttackId(uint16_t entityIndex) {
+    return entityIndex ^ 0xEFF5;
 }
+
+} // namespace Object
+
+// ============================================================================
+// Player — jogador local
+// ============================================================================
+namespace Player {
+
+// Ponteiro para o objeto do jogador local no viewport (ou null)
+uintptr_t Object();
+
+// Ponteiro para a estrutura do personagem (ou null)
+// Endereço: main.exe + GameAddresses::CHARACTER_PTR (struct direta)
+// Contém: nome, classe, skills. NÃO contém level/stats.
+uintptr_t Character();
+
+// Ponteiro para a estrutura de stats do personagem (ou null)
+// Endereço: *(main.exe + GameAddresses::USER_OBJECT_PTR) (ponteiro indireto)
+// Contém: nome, level, stats (STR/AGI/VIT/ENE)
+uintptr_t UserObject();
+
+// Define o index do jogador local (recebido do proxy via D4).
+// Quando definido, Object() busca por type==1 && index==playerIndex.
+void SetIndex(uint16_t index);
+uint16_t Index();
+
+// ---- Stats (UserObjectStruct) ----
+
+inline WORD Level() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LEVEL) : 0;
+}
+
+inline WORD Str() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_STR) : 0;
+}
+inline WORD Agi() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_AGI) : 0;
+}
+inline WORD Vit() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_VIT) : 0;
+}
+inline WORD Ene() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_ENE) : 0;
+}
+inline WORD Life() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LIFE) : 0;
+}
+inline WORD MaxLife() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXLIFE) : 0;
+}
+inline WORD Mana() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MANA) : 0;
+}
+inline WORD MaxMana() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXMANA) : 0;
+}
+inline WORD Shield() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_SHIELD) : 0;
+}
+inline WORD MaxShield() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_MAXSHIELD) : 0;
+}
+inline WORD AttackSpeed() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_ATTACKSPEED) : 0;
+}
+inline WORD DamageMin() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_DAMAGEMIN) : 0;
+}
+inline WORD DamageMax() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_DAMAGEMAX) : 0;
+}
+inline WORD LevelPoint() {
+    uintptr_t uo = UserObject();
+    return uo ? *(WORD*)(uo + UserObjectStruct::OFF_LEVELPOINT) : 0;
+}
+inline DWORD Exp() {
+    uintptr_t uo = UserObject();
+    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_EXP) : 0;
+}
+inline DWORD NextExp() {
+    uintptr_t uo = UserObject();
+    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_NEXTEXP) : 0;
+}
+inline DWORD Money() {
+    uintptr_t uo = UserObject();
+    return uo ? *(DWORD*)(uo + UserObjectStruct::OFF_MONEY_INV) : 0;
+}
+inline BYTE Class() {
+    uintptr_t uo = UserObject();
+    return uo ? *(BYTE*)(uo + UserObjectStruct::OFF_CLASS) : 0;
+}
+inline WORD MagicCount() {
+    uintptr_t uo = UserObject();
+    return uo ? *(BYTE*)(uo + UserObjectStruct::OFF_MAGICCOUNT) : 0;
+}
+
+// Ponteiro para a lista de magias (WORD[650])
+inline uintptr_t MagicList() {
+    uintptr_t uo = UserObject();
+    return uo ? (uo + UserObjectStruct::OFF_MAGICLIST) : 0;
+}
+
+// Ponteiro para um item do equipamento (slot 0-11)
+inline uintptr_t Equipment(int slot) {
+    if (slot < 0 || slot > 11) return 0;
+    uintptr_t uo = UserObject();
+    return uo ? (uo + UserObjectStruct::OFF_EQUIPMENT + slot * UserObjectStruct::ITEM_SIZE) : 0;
+}
+
+} // namespace Player
 
 } // namespace GameMemory

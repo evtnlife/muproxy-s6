@@ -276,7 +276,7 @@ static __declspec(naked) void SMEncryptHookStub()
 static DWORD WINAPI InstallThread(LPVOID)
 {
     for (int i = 0; i < 30; ++i) {
-        uintptr_t base = GameMemory::GetMainBase();
+        uintptr_t base = GameMemory::Globals::MainBase();
         if (base) {
             // ---- Hook 1: SKILL_ENCRYPT_SEND (0x404D70) ----
             uintptr_t rva1 = GameAddresses::SKILL_ENCRYPT_SEND;

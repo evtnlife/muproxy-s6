@@ -49,13 +49,13 @@ float SafeReadFloat(uintptr_t addr) {
 // DIAGNÓSTICO: despeja o ObjectManager completo com viewport scan
 // ============================================================================
 void DumpObjectManager() {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) {
         Logger::Log("ATTACK", "DUMP: ObjectArray null!");
         return;
     }
 
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+    uintptr_t localPlayer = GameMemory::Player::Object();
     float lx = localPlayer ? SafeReadFloat(localPlayer + GameObject::OFF_X) : 0.0f;
     float ly = localPlayer ? SafeReadFloat(localPlayer + GameObject::OFF_Y) : 0.0f;
 
@@ -73,7 +73,7 @@ void DumpObjectManager() {
         float x = SafeReadFloat(obj + GameObject::OFF_X);
         float y = SafeReadFloat(obj + GameObject::OFF_Y);
         char name[64] = {};
-        GameMemory::GetName(i, name, sizeof(name));
+        GameMemory::Object::Name(i, name, sizeof(name));
 
         float dx = x - lx, dy = y - ly;
         float dist = sqrtf(dx * dx + dy * dy);
@@ -145,7 +145,7 @@ void DumpObjectManager() {
 // HEX DUMP: despeja o slot inteiro (0x598 bytes) com anotações
 // ============================================================================
 void HexDumpSlot(int slotIndex) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) {
         Logger::Log("ATTACK", "HEXDUMP: ObjectArray null!");
         return;
@@ -161,7 +161,7 @@ void HexDumpSlot(int slotIndex) {
     WORD compIndex = *(WORD*)(obj + GameObject::OFF_INDEX);
     BYTE slotByte = (BYTE)(slotIndex & 0xFF);
     char name[64];
-    GameMemory::GetName(slotIndex, name, sizeof(name));
+    GameMemory::Object::Name(slotIndex, name, sizeof(name));
 
     Logger::Log("ATTACK", "==== HEXDUMP slot=%d type=%d live=%d idx=0x%04X slotByte=0x%02X(%d) name='%s' ====",
                 slotIndex, type, live, compIndex, slotByte, slotByte, name);

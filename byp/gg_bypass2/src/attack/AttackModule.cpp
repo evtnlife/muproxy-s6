@@ -63,13 +63,13 @@ AttackConfig& GetConfig() { return g_Config; }
 
 // ---- Distância entre local player e o slot do alvo ----
 static float DistanceToSlot(int slotIndex) {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+    uintptr_t localPlayer = GameMemory::Player::Object();
     if (!localPlayer) return 9999.0f;
 
     float lx = *(float*)(localPlayer + GameObject::OFF_X);
     float ly = *(float*)(localPlayer + GameObject::OFF_Y);
 
-    uintptr_t obj = GameMemory::GetObjectByIndex(slotIndex);
+    uintptr_t obj = GameMemory::Object::ByIndex(slotIndex);
     if (!obj) return 9999.0f;
 
     float tx = *(float*)(obj + GameObject::OFF_X);
@@ -87,10 +87,10 @@ static float DistanceToSlot(int slotIndex) {
 // Fórmula: dir = floor((atan2(dy,dx) + PI/2) / (2*PI) * 8) % 8
 // Resultado: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
 static uint8_t ComputeDirection(uint16_t targetEntityIndex) {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+    uintptr_t localPlayer = GameMemory::Player::Object();
     if (!localPlayer) return 0;
 
-    uintptr_t targetObj = GameMemory::FindObjectByEntityIndex(targetEntityIndex);
+    uintptr_t targetObj = GameMemory::Object::FindByEntityIndex(targetEntityIndex);
     if (!targetObj) return 0;
 
     float playerX = *(float*)(localPlayer + GameObject::OFF_X);
@@ -168,8 +168,8 @@ static bool SendPlainPacket(const uint8_t* packet, int len);
 // XorData encadeado no payload → SimpleModulus → C3 0D [11] → Layer-1 → wire.
 // (PacketInjector::Inject escolhe o pipeline pelo opcode 0x19.)
 bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
-    uintptr_t targetObj = GameMemory::FindObjectByEntityIndex(entityIndex);
+    uintptr_t localPlayer = GameMemory::Player::Object();
+    uintptr_t targetObj = GameMemory::Object::FindByEntityIndex(entityIndex);
     if (!localPlayer || !targetObj) {
         Logger::Log("ATTACK", "SkillAttack: localPlayer or target null (entityIndex=0x%04X)", entityIndex);
         return false;
@@ -178,7 +178,7 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     // Log detalhado: comparar OFF_INDEX vs OFF_ID vs slot index
     uint16_t compositeIdx = *(WORD*)(targetObj + GameObject::OFF_INDEX);  // 0x7E
     uint16_t objId = *(WORD*)(targetObj + GameObject::OFF_ID);            // 0x84
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     int slotIndex = (arrayBase && targetObj > arrayBase) ?
                     (int)((targetObj - arrayBase) / GameAddresses::OBJECT_SIZE) : -1;
 
@@ -235,7 +235,7 @@ bool SendConfiguredAttack(int slotIndex) {
     }
 
     // Usa o entity index (OFF_INDEX) do slot
-    uint16_t entityIndex = GameMemory::GetCompositeIndex(slotIndex);
+    uint16_t entityIndex = GameMemory::Object::CompositeIndex(slotIndex);
     if (entityIndex == 0) return false;
 
     // Envia pacote conforme tipo (skill loga em SendSkillAttack; normal sem log)
@@ -283,8 +283,8 @@ static DWORD WINAPI AttackSingleMobThread(LPVOID param) {
 static DWORD WINAPI WatcherThread(LPVOID) {
     Logger::Log("ATTACK", "Watcher iniciado");
     while (InterlockedCompareExchange(&g_Running, 1, 1) == 1) {
-        uintptr_t arrayBase = GameMemory::GetObjectArray();
-        uintptr_t localPlayer = GameMemory::GetLocalPlayer();
+        uintptr_t arrayBase = GameMemory::Object::Array();
+        uintptr_t localPlayer = GameMemory::Player::Object();
 
         if (arrayBase && localPlayer) {
             float lx = *(float*)(localPlayer + GameObject::OFF_X);
@@ -504,12 +504,12 @@ REGISTER_MESSAGE(ATTACK_CONFIG, HandleAttackConfig);
 static void HandleAttackPlayerIdx(const char* payload) {
     uint16_t playerIdx = 0;
     if (CommandParams::ParseHexParam(payload, "idx", &playerIdx) && playerIdx != 0) {
-        GameMemory::SetLocalPlayerIndex(playerIdx);
+        GameMemory::Player::SetIndex(playerIdx);
         Logger::Log("ATTACK", "PLAYERIDX setado: 0x%04X", playerIdx);
     } else {
         unsigned int val = 0;
         if (sscanf_s(payload, "%x", &val) == 1 && val != 0) {
-            GameMemory::SetLocalPlayerIndex((uint16_t)val);
+            GameMemory::Player::SetIndex((uint16_t)val);
             Logger::Log("ATTACK", "PLAYERIDX setado (direto): 0x%04X", (uint16_t)val);
         }
     }

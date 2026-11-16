@@ -9,16 +9,12 @@ static uintptr_t g_MainBase = 0;
 static uintptr_t g_MainDllBase = 0;
 static uint16_t g_LocalPlayerIndex = 0;  // Index do jogador local (setado via D4)
 
-void SetLocalPlayerIndex(uint16_t index) {
-    g_LocalPlayerIndex = index;
-    Logger::Log("GAMEMEMORY", "LocalPlayerIndex setado para 0x%04X", index);
-}
+// ============================================================================
+// Globals
+// ============================================================================
+namespace Globals {
 
-uint16_t GetLocalPlayerIndex() {
-    return g_LocalPlayerIndex;
-}
-
-uintptr_t GetMainBase() {
+uintptr_t MainBase() {
     if (g_MainBase == 0) {
         // Tenta "main.exe" primeiro
         g_MainBase = (uintptr_t)GetModuleHandleA("main.exe");
@@ -33,7 +29,7 @@ uintptr_t GetMainBase() {
     return g_MainBase;
 }
 
-uintptr_t GetMainDllBase() {
+uintptr_t MainDllBase() {
     if (g_MainDllBase == 0) {
         g_MainDllBase = (uintptr_t)GetModuleHandleA("Main.dll");
         if (g_MainDllBase) {
@@ -43,31 +39,54 @@ uintptr_t GetMainDllBase() {
     return g_MainDllBase;
 }
 
-uintptr_t GetObjectManager() {
-    uintptr_t base = GetMainBase();
+} // namespace Globals
+
+// ============================================================================
+// Object
+// ============================================================================
+namespace Object {
+
+uintptr_t Manager() {
+    uintptr_t base = Globals::MainBase();
     if (!base) return 0;
     return *(uintptr_t*)(base + GameAddresses::OBJ_MANAGER_PTR);
 }
 
-uintptr_t GetObjectArray() {
-    uintptr_t manager = GetObjectManager();
+uintptr_t Array() {
+    uintptr_t manager = Manager();
     if (!manager) return 0;
     return *(uintptr_t*)(manager + GameAddresses::OBJ_ARRAY_OFFSET);
 }
 
-uintptr_t GetObjectByIndex(int index) {
+uintptr_t ByIndex(int index) {
     if (index < 0 || index >= GameAddresses::MAX_OBJECTS) return 0;
-    uintptr_t arrayBase = GetObjectArray();
+    uintptr_t arrayBase = Array();
     if (!arrayBase) return 0;
     return arrayBase + index * GameAddresses::OBJECT_SIZE;
 }
 
-uintptr_t GetLocalPlayer() {
+} // namespace Object
+
+// ============================================================================
+// Player
+// ============================================================================
+namespace Player {
+
+void SetIndex(uint16_t index) {
+    g_LocalPlayerIndex = index;
+    Logger::Log("GAMEMEMORY", "LocalPlayerIndex setado para 0x%04X", index);
+}
+
+uint16_t Index() {
+    return g_LocalPlayerIndex;
+}
+
+uintptr_t Object() {
     // Metodo 1: Se o PlayerIndex foi setado via D4, busca direto pelo slot
     // com type==1 e index==playerIndex. Isso e 100% preciso mesmo com
     // multiplos players na tela.
     if (g_LocalPlayerIndex != 0) {
-        uintptr_t arrayBase = GetObjectArray();
+        uintptr_t arrayBase = GameMemory::Object::Array();
         if (arrayBase) {
             for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
                 uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
@@ -89,7 +108,7 @@ uintptr_t GetLocalPlayer() {
     }
 
     // Metodo 2: Tenta o ponteiro direto
-    uintptr_t base = GetMainBase();
+    uintptr_t base = Globals::MainBase();
     if (base) {
         uintptr_t ptr = *(uintptr_t*)(base + GameAddresses::LOCAL_PLAYER_PTR);
         if (ptr) {
@@ -102,7 +121,7 @@ uintptr_t GetLocalPlayer() {
     }
 
     // Metodo 3: Scan do ObjectArray — retorna o primeiro type=1 e isLive!=0
-    uintptr_t arrayBase = GetObjectArray();
+    uintptr_t arrayBase = GameMemory::Object::Array();
     if (!arrayBase) return 0;
 
     for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
@@ -122,8 +141,8 @@ uintptr_t GetLocalPlayer() {
     return 0;
 }
 
-uintptr_t GetCharacter() {
-    uintptr_t base = GetMainBase();
+uintptr_t Character() {
+    uintptr_t base = Globals::MainBase();
     if (!base) return 0;
     // CHARACTER_PTR é o endereço DIRETO da struct, não um ponteiro
     uintptr_t ptr = base + GameAddresses::CHARACTER_PTR;
@@ -137,8 +156,8 @@ uintptr_t GetCharacter() {
     return 0;
 }
 
-uintptr_t GetUserObject() {
-    uintptr_t base = GetMainBase();
+uintptr_t UserObject() {
+    uintptr_t base = Globals::MainBase();
     if (!base) return 0;
     // USER_OBJECT_PTR é um ponteiro indireto: *(base + RVA)
     uintptr_t ptr = *(uintptr_t*)(base + GameAddresses::USER_OBJECT_PTR);
@@ -152,5 +171,7 @@ uintptr_t GetUserObject() {
     if (valid && name[0] != '\0') return ptr;
     return 0;
 }
+
+} // namespace Player
 
 } // namespace GameMemory
