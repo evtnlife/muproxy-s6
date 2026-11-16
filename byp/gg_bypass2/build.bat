@@ -22,7 +22,7 @@ echo Compilando gg_bypass2.dll...
 if not exist build mkdir build
 if not exist ..\dist mkdir ..\dist
 
-set SOURCES=src\dllmain.cpp src\Logger.cpp src\PacketSniffer.cpp src\GameMemory.cpp src\InlineHook.cpp src\TcpClient.cpp src\PacketHandler.cpp src\MessageRegistry.cpp src\MonsterTracker.cpp src\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp src\SkillHook.cpp src\SimpleModulusCipher.cpp src\ViewportMap.cpp src\SkillMap.cpp src\crypto\MuCipher.cpp
+set SOURCES=src\dllmain.cpp src\Logger.cpp src\PacketSniffer.cpp src\GameMemory.cpp src\InlineHook.cpp src\TcpClient.cpp src\PacketHandler.cpp src\MessageRegistry.cpp src\MonsterTracker.cpp src\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp src\SkillHook.cpp src\SimpleModulusCipher.cpp src\ViewportMap.cpp src\SkillMap.cpp src\crypto\MuCipher.cpp src\NameRewriter.cpp src\PacketReassembler.cpp
 
 cl.exe /nologo /O2 /LD /MD /W3 /Isrc\include %SOURCES% /Fobuild\ /link /DEF:src\Main.def /OUT:..\dist\byp.dll /MACHINE:X86 /OPT:REF /OPT:ICF
 

@@ -12,6 +12,8 @@
 #include "include/SimpleModulusCipher.h"
 #include "include/ViewportMap.h"
 #include "include/SkillMap.h"
+#include "include/PacketReassembler.h"
+#include "include/NameRewriter.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -366,100 +368,57 @@ static bool GetSocketPort(SOCKET s, int* outPort) {
     return false;
 }
 
-static CRITICAL_SECTION g_ReasmLock;
-static bool g_ReasmInit = false;
-static std::map<SOCKET, std::vector<BYTE>> g_ReasmBuffers;
+// ============================================================================
+// Consumer do PacketReassembler: recebe um pacote MU completo (ja decifrado)
+// e faz o que o antigo FlushReasmBuffer fazia: envia "PKT|dir|hex" ao proxy.
+// ============================================================================
+struct ReasmContext {
+    const char* dir;
+    unsigned char xorKey;
+    unsigned char subKey;
+    bool isGameServer;
+};
 
-static std::vector<BYTE>* GetReasmBuffer(SOCKET s)
+static void OnReassembledPacket(void* ctx, const uint8_t* data, int len)
 {
-    if (!g_ReasmInit) {
-        InitializeCriticalSection(&g_ReasmLock);
-        g_ReasmInit = true;
-    }
-    EnterCriticalSection(&g_ReasmLock);
-    std::vector<BYTE>* buf = &g_ReasmBuffers[s];
-    LeaveCriticalSection(&g_ReasmLock);
-    return buf;
-}
+    ReasmContext* c = (ReasmContext*)ctx;
+    if (!c || !data || len <= 0) return;
 
-static void RemoveReasmBuffer(SOCKET s)
-{
-    if (!g_ReasmInit) return;
-    EnterCriticalSection(&g_ReasmLock);
-    g_ReasmBuffers.erase(s);
-    LeaveCriticalSection(&g_ReasmLock);
-}
+    char outBuf[4096];
+    int copyLen = len < (int)sizeof(outBuf) ? len : (int)sizeof(outBuf);
+    memcpy(outBuf, data, copyLen);
 
-static int ReadMuPacketLength(const std::vector<BYTE>& buf)
-{
-    if (buf.empty()) return 0;
-    BYTE h = buf[0];
-    int hdr = MuCipher::GetMuHeaderSize(h);
-    if ((int)buf.size() < hdr) return 0;
-    if (h == 0xC1 || h == 0xC3) return buf[1];
-    if (h == 0xC2 || h == 0xC4) return (buf[1] << 8) | buf[2];
-    return 0;
-}
+    if (c->isGameServer)
+        MuCipher::FullDecrypt(outBuf, copyLen, c->xorKey, c->subKey);
 
-static void FlushReasmBuffer(SOCKET s, const char* dir, unsigned char xorKey, unsigned char subKey, bool isGameServer)
-{
-    std::vector<BYTE>* buf = GetReasmBuffer(s);
-    int emitted = 0;
-    while (!buf->empty())
-    {
-        int pktLen = ReadMuPacketLength(*buf);
-        if (pktLen == 0 || (int)buf->size() < pktLen) break;
-        // Sanity: pacote nao pode ser maior que buffer acumulado excessivo
-        if (pktLen > 4096) {
-            buf->clear();
-            RemoveReasmBuffer(s);
-            break;
-        }
-
-        std::vector<BYTE> pkt(buf->begin(), buf->begin() + pktLen);
-        buf->erase(buf->begin(), buf->begin() + pktLen);
-
-        char outBuf[4096];
-        int copyLen = (int)pkt.size() < (int)sizeof(outBuf) ? (int)pkt.size() : (int)sizeof(outBuf);
-        memcpy(outBuf, pkt.data(), copyLen);
-
-        if (isGameServer)
-            MuCipher::FullDecrypt(outBuf, copyLen, xorKey, subKey);
-
-        // Parse de pacotes RECV (já decifrados) para alimentar os mapas dinâmicos.
-        // Só processa tráfego do game server (porta 55902).
-        if (isGameServer && dir && dir[0] == 'R') {
-            int hdr = MuCipher::GetMuHeaderSize((BYTE)outBuf[0]);
-            if (hdr > 0 && copyLen > hdr) {
-                BYTE opcode = (BYTE)outBuf[hdr];
-                if (opcode == 0x13) {
-                    ViewportMap::OnViewportPacket((const uint8_t*)outBuf, copyLen);
-                } else if (opcode == 0xF3 && copyLen > hdr + 1) {
-                    BYTE sub = (BYTE)outBuf[hdr + 1];
-                    if (sub == 0x11 || sub == 0xE2) {
-                        SkillMap::OnSkillListPacket((const uint8_t*)outBuf, copyLen);
-                    }
+    // Parse de pacotes RECV (já decifrados) para alimentar os mapas dinâmicos.
+    // Só processa tráfego do game server (porta 55902).
+    if (c->isGameServer && c->dir && c->dir[0] == 'R') {
+        int hdr = MuCipher::GetMuHeaderSize((BYTE)outBuf[0]);
+        if (hdr > 0 && copyLen > hdr) {
+            BYTE opcode = (BYTE)outBuf[hdr];
+            if (opcode == 0x13) {
+                ViewportMap::OnViewportPacket((const uint8_t*)outBuf, copyLen);
+            } else if (opcode == 0xF3 && copyLen > hdr + 1) {
+                BYTE sub = (BYTE)outBuf[hdr + 1];
+                if (sub == 0x11 || sub == 0xE2) {
+                    SkillMap::OnSkillListPacket((const uint8_t*)outBuf, copyLen);
                 }
             }
         }
+    }
 
-        // Envia ao proxy (UM pacote por linha PKT|dir|hex)
-        char line[8192];
-        int pos = snprintf(line, sizeof(line), "PKT|%s|", dir);
-        if (pos <= 0 || pos >= (int)sizeof(line)) continue;
-        for (int i = 0; i < copyLen && pos + 2 < (int)sizeof(line); ++i)
-            pos += snprintf(line + pos, sizeof(line) - pos, "%02X", (unsigned char)outBuf[i]);
-        if (pos + 1 < (int)sizeof(line))
-            line[pos++] = '\n';
-        else
-            continue;
-        SendLine(line, pos);
-        emitted++;
-    }
-    // Evita vazamento infinito se bytes lixo/nao-MU acumularem
-    if (buf->size() > 32768) {
-        buf->clear();
-    }
+    // Envia ao proxy (UM pacote por linha PKT|dir|hex)
+    char line[8192];
+    int pos = snprintf(line, sizeof(line), "PKT|%s|", c->dir);
+    if (pos <= 0 || pos >= (int)sizeof(line)) return;
+    for (int i = 0; i < copyLen && pos + 2 < (int)sizeof(line); ++i)
+        pos += snprintf(line + pos, sizeof(line) - pos, "%02X", (unsigned char)outBuf[i]);
+    if (pos + 1 < (int)sizeof(line))
+        line[pos++] = '\n';
+    else
+        return;
+    SendLine(line, pos);
 }
 
 // ============================================================================
@@ -505,48 +464,17 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
     // Nao loga hex bruto aqui (poluicao). O log detalhado (stack trace, C3/C4
     // decrypt, SMOD) e feito no HookSend/HookWSASend. So reassemble + proxy.
 
-    std::vector<BYTE>* buf = GetReasmBuffer(s);
-    buf->insert(buf->end(), (const BYTE*)src, (const BYTE*)src + srcLen);
-    FlushReasmBuffer(s, dir, xorKey, subKey, false); // buffer ja esta decifrado/claro
+    // O buffer ja esta decifrado/claro (isGameServer=false no consumer).
+    ReasmContext ctx = { dir, xorKey, subKey, false };
+    PacketReassembler::Append(s, (const uint8_t*)src, srcLen);
+    PacketReassembler::Flush(s, OnReassembledPacket, &ctx);
 }
 
 // ============================================================================
-// Character Creation Rewrite: substitui nome/classe no pacote 0x31
-// Algoritmo de encoding (descoberto via engenharia reversa):
-//   key = [CF, DB, 23, C5, A3, CA, 33, C1, CC, 66]
-//   enc[0] = name[0] ^ key[0]
-//   enc[1] = name[1] ^ key[1]
-//   enc[i] = name[i] ^ enc[i-1] ^ key[i]  (i >= 2)
-//   classByte = class ^ enc[8] ^ 0x63
+// Character Creation Rewrite: nome/classe no pacote 0x31
+// (EncodeName / IsCreateCharPacket / g_NameKey / g_RewriteName / g_RewriteClass)
+// vivem no módulo NameRewriter.
 // ============================================================================
-static const BYTE g_NameKey[10] = { 0xCF, 0xDB, 0x23, 0xC5, 0xA3, 0xCA, 0x33, 0xC1, 0xCC, 0x66 };
-static const BYTE g_ClassKey = 0x63;
-
-// Nome e classe desejados
-static const char* g_RewriteName = "HexDL";
-static const BYTE g_RewriteClass = 0x10; // Dark Lord (client-side)
-
-static void EncodeName(const char* name, BYTE classId, BYTE* outEncoded)
-{
-    int nameLen = (int)strlen(name);
-    for (int i = 0; i < 10; i++) {
-        BYTE p = (i < nameLen) ? (BYTE)name[i] : 0;
-        if (i == 0)
-            outEncoded[i] = p ^ g_NameKey[0];
-        else if (i == 1)
-            outEncoded[i] = p ^ g_NameKey[1];
-        else
-            outEncoded[i] = p ^ outEncoded[i-1] ^ g_NameKey[i];
-    }
-    outEncoded[10] = classId ^ outEncoded[8] ^ g_ClassKey;
-}
-
-static bool IsCreateCharPacket(const char* data, int len)
-{
-    if (len < 15) return false;
-    return (BYTE)data[0] == 0xC1 && (BYTE)data[1] == 0x0F
-        && (BYTE)data[2] == 0x31 && (BYTE)data[3] == 0xC3;
-}
 
 static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
 {
@@ -704,7 +632,7 @@ static int WINAPI HookRecv(SOCKET s, char* buf, int len, int flags)
         Logger::Log("PACKETSNIFFER", "recv() ret=%d socket=%d", r, (int)s);
         LogRaw("RECV", s, buf, r);
     }
-    if (r == 0) RemoveReasmBuffer(s); // conexao fechada
+    if (r == 0) PacketReassembler::Remove(s); // conexao fechada
     return r;
 }
 
@@ -780,7 +708,7 @@ static int WINAPI HookWSARecv(SOCKET s, LPWSABUF buffers, DWORD bufferCount,
         }
     }
     if (r != 0 && WSAGetLastError() != WSA_IO_PENDING)
-        RemoveReasmBuffer(s);
+        PacketReassembler::Remove(s);
     return r;
 }
 

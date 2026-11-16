@@ -1,15 +1,15 @@
 [
   {
-    "content": "Fase 1 (MuCipher): build + commit das mudanças já feitas (2.1-2.3 prontas, 2.4 commit)",
-    "status": "in_progress"
+    "content": "Fase 1 (MuCipher): build + commit (c92afdc) — teste em campo pendente do usuário",
+    "status": "completed"
   },
   {
-    "content": "Fase 2: extrair DebugTools (DebugTools.cpp) do AttackModule + registrar comandos + build + commit",
-    "status": "pending"
+    "content": "Fase 2: DebugTools extraído do AttackModule + comandos registrados + build + commit (de2c6f8)",
+    "status": "completed"
   },
   {
     "content": "Fase 3: NameRewriter + PacketReassembler + build + commit",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Fase 4: PacketInjector (porta única por opcode) + build + commit",
