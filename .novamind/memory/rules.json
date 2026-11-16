@@ -7,6 +7,8 @@
     "User communicates in Portuguese",
     "Project is a BlackrockMU private server client at F:\\blackrockmu",
     "PS (PS.dll) no longer exists in the project — related docs can be deleted",
-    "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)"
+    "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)",
+    "não podemos esquecer da estrutura de pasta ok, não quero cpp solto sem pasta assim ta mt bagunçado isso",
+    "não seria melhor subdividir cada namespace no gamememory? cada um com seu arquivo"
   ]
 }

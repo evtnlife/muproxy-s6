@@ -1,42 +1,42 @@
 [
   {
-    "content": "Fase 1 (MuCipher): build + commit (c92afdc)",
+    "content": "OpenSpec change add-auto-potion (proposal/design/tasks) + spec",
     "status": "completed"
   },
   {
-    "content": "Fase 2: DebugTools extraído do AttackModule + comandos (de2c6f8)",
+    "content": "MuCipher: add UnXorData (inverse da Camada-2)",
     "status": "completed"
   },
   {
-    "content": "Fase 3: NameRewriter + PacketReassembler (49f42fb)",
+    "content": "PacketInjector: pipeline por opcode + MuOpcodes enum (0x26 uso de item)",
     "status": "completed"
   },
   {
-    "content": "Reorganização de pastas por domínio (eb7708d)",
+    "content": "Módulo AutoPotion (header+cpp): watcher, thresholds, aprendizado de slot, comandos",
     "status": "completed"
   },
   {
-    "content": "Fase 4: PacketInjector porta única (406eb85)",
+    "content": "PacketSniffer: notificar AutoPotion sobre pacotes C1 26 de saída",
     "status": "completed"
   },
   {
-    "content": "Fase 5: CommandChannel + PacketChannel (f4b7b44)",
+    "content": "dllmain + build.bat: registrar o novo módulo",
     "status": "completed"
   },
   {
-    "content": "Fase 6: WinsockHooks (6c16147)",
+    "content": "Build e verificação (byp.dll)",
     "status": "completed"
   },
   {
-    "content": "Fase 7: GameMemory em sub-namespaces (3730e71)",
+    "content": "MuProxy2: mensagem, PotionService, UI do auto potion",
     "status": "completed"
   },
   {
-    "content": "Integração final: GameMemory por arquivo + módulos extraídos (5becc0a) + tasks.md",
+    "content": "Documentar na skill (§13) e memória do projeto",
     "status": "completed"
   },
   {
-    "content": "Pendente do usuário: teste em campo (9.1) e arquivar o change",
-    "status": "pending"
+    "content": "Commit final + revisão do diff",
+    "status": "in_progress"
   }
 ]

@@ -66,3 +66,60 @@
 - Workflow: write a small separate doc per step IMMEDIATELY after each analysis step, one step at a time
 - Technical: C1 07 19 "skill wire 0xE7C3" was misread; Send fn overwrites data[3] with serial
 ---
+
+## Knowledge Consolidation - 2026-11-16T01:45:52.851Z
+
+## Resumo da conversa
+
+**Tarefa:** aplicar o change OpenSpec `reorganize-byp-modules` em `F:\blackrockmu` (cliente BlackrockMU), reorganizando o `byp.dll` (C++ x86) em módulos por responsabilidade, sem alterar comportamento observável. Resposta obrigatória em português.
+
+### Change OpenSpec lido
+- `F:\blackrockmu\openspec\changes\reorganize-byp-modules\proposal.md`, `design.md`, `tasks.md`, `.openspec.yaml`
+
+### Estrutura final (decisão do usuário: sem `.cpp` solto na raiz; cada namespace em arquivo próprio)
+Headers em `src\include\`; implementações em `core\`, `crypto\`, `net\`, `net\winsock\`, `packets\`, `game\`, `game\GameMemory\`, `attack\`, `debug\`.
+
+### Arquivos criados
+`F:\blackrockmu\byp\gg_bypass2\src\include\{CommandParams.h, DebugTools.h, NameRewriter.h, PacketReassembler.h, PacketInjector.h, OriginalApi.h, CommandChannel.h, PacketChannel.h, WinsockHooks.h, StackTrace.h, GameServerConnection.h, C3Decoder.h, GameMemory\Globals.h, GameMemory\Object.h, GameMemory\Player.h}`
+`F:\blackrockmu\byp\gg_bypass2\src\debug\{DebugTools.cpp, DebugScans.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\packets\{NameRewriter.cpp, PacketReassembler.cpp, PacketInjector.cpp, GameServerConnection.cpp, PacketSniffer.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\net\{CommandChannel.cpp, PacketChannel.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\net\winsock\WinsockHooks.cpp`
+`F:\blackrockmu\byp\gg_bypass2\src\core\{OriginalApi.cpp, StackTrace.cpp, dllmain.cpp, Logger.cpp, InlineHook.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\crypto\{MuCipher.cpp, SimpleModulusCipher.cpp, C3Decoder.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\game\GameMemory\{Globals.cpp, Object.cpp, Player.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\game\{MonsterTracker.cpp, ViewportMap.cpp, SkillMap.cpp, SkillHook.cpp}`
+`F:\blackrockmu\byp\gg_bypass2\src\attack\AttackModule.cpp`
+
+### Arquivos movidos (git rename)
+`src\{dllmain,Logger,InlineHook}.cpp`→`core\`; `src\SimpleModulusCipher.cpp`→`crypto\`; `src\{TcpClient,PacketHandler,MessageRegistry}.cpp`→`net\`; `src\{PacketSniffer,PacketReassembler,NameRewriter}.cpp`→`packets\`; `src\{GameMemory,MonsterTracker,ViewportMap,SkillMap,SkillHook}.cpp`→`game\`; `src\AttackModule.cpp`→`attack\`; `src\include\TcpClient.h`→`include\CommandChannel.h`; `src\game\GameMemory.cpp`→`game\GameMemory\Player.cpp`.
+
+### Arquivos modificados
+`F:\blackrockmu\byp\gg_bypass2\build.bat` (SOURCES por pasta), `src\include\PacketSniffer.h`, `src\include\GameMemory.h` (removido), `src\game\GameMemory.cpp` (removido), `src\attack\AttackModule.cpp`, `src\game\MonsterTracker.cpp`, `src\game\SkillHook.cpp`, `src\core\dllmain.cpp`, `src\net\PacketHandler.cpp`, `src\crypto\{MuCipher,SimpleModulusCipher}.cpp`, `src\debug\{DebugTools,DebugScans}.cpp`, `src\packets\PacketSniffer.cpp`, `F:\blackrockmu\openspec\changes\reorganize-byp-modules\tasks.md`, `F:\blackrockmu\byp.dll` (artefato).
+
+### Arquivos lidos (não modificados)
+`F:\blackrockmu\byp\gg_bypass2\check_imports.bat`; `src\include\{Config.h, GameObject.h, MessageRegistry.h, PacketHandler.h, PacketSniffer.h, AttackModule.h, sdk.h, SimpleModulusCipher.h, MuCipher.h, DebugTools.h, TcpClient.h}`; `src\{MessageRegistry, PacketHandler, Logger, TcpClient}.cpp`; `src\game\SkillHook.cpp`; `F:\blackrockmu\byp\MuProxy2\MuProxy2\Protocol\{Messages.cs, MonsterAttacker.cs}`; `F:\blackrockmu\byp\MuProxy2\MuProxy2\Services\{ServiceHub.cs, DllCommandService.cs}`; `F:\blackrockmu\byp\MuProxy2\MuProxy2\MainForm.cs`.
+
+### Decisões-chave
+- `MuCipher` = módulo único de cifra; XorData aplicado uma vez; porta única `PacketInjector::Inject` (0x11→Layer-1; 0x19→SM+serial→C3 0D→Layer-1) + `InjectXorData` para dados já cifrados; transporte via callback.
+- `DebugTools` extraído do AttackModule (tag de log mantida "ATTACK"); comandos `ATTACK_DUMP/HEXDUMP/SCANVALUE/SCANSLOT/DIRSCAN` via MessageRegistry; parsing extraído para `CommandParams.h`.
+- `NameRewriter` preservado **dormante** (sem call-site, não ativado).
+- `PacketReassembler` com callback; branch morto de ViewportMap/SkillMap mantido inerte.
+- `TcpClient`→`CommandChannel` (44412); `PacketChannel` novo (44413); `OriginalApi` guarda trampolines (send/connect) para os canais não passarem pelo hook.
+- `WinsockHooks` extraído com observers; `PacketSniffer` virou orquestrador; hooks continuam síncronos em `DLL_PROCESS_ATTACH` (ordem do DllMain preservada).
+- Strings de log preservadas (ex.: `InjectSkillC1: after XorData`) para comparação em campo.
+
+### Erros e correções
+- `run_command` com cwd relativo → ENOENT; resolvido executando da raiz.
+- `git show` não existe na tool git → usado `run_command`.
+- Primeiro commit varreu `.rar` de 191 MB e deleções `.novamind` → `git commit --amend` removeu/restaurou.
+- `MAKE_VERSION` inexistente → `MAKEWORD(2,2)`.
+- Detecção C116 reimplementada por engano → recuperada do `git show` e copiada verbatim (porta big-endian).
+- `GameMemory.h` removido com include pendente em `PacketHandler.cpp` → C1083 → include morto removido.
+- `Player::Object()` sombreava o namespace `Object` → qualificado `GameMemory::Object::Array()`.
+- Bloco TCP não removido por edição fuzzy → releitura e remoções em blocos.
+- Caracteres chineses acidentais em comentário → corrigidos.
+
+### Estado atual
+Commits: `c92afdc` (Fase 1 MuCipher), `de2c6f8` (Fase 2 DebugTools), `49f42fb` (Fase 3), `eb7708d` (pastas), `406eb85` (Fase 4), `f4b7b44` (Fase 5), `6c16147` (Fase 6), `3730e71` (Fase 7), `5becc0a` (integração final), `6846467` (tasks.md). Build via `cmd /c "byp\gg_bypass2\build.bat"` → SUCESSO, apenas warnings pré-existentes (C4996 `inet_ntoa`, C4530 `/EHsc`); `byp.dll` implantado em `F:\blackrockmu`. Árvore limpa. Restam apenas **testes de campo** do usuário: comparar bytes 0x11/0x19 com os anteriores, conectividade com o MuProxy2 e os comandos de debug; a próxima ação pendente era salvar memória do projeto sobre a nova estrutura.
+---
