@@ -43,6 +43,16 @@ namespace WinFormsMitm
             rbSkill = new RadioButton();
             rbNormalAttack = new RadioButton();
             cbSkills = new ComboBox();
+            groupBoxPotion = new GroupBox();
+            chkAutoPotion = new CheckBox();
+            labelPotionHp = new Label();
+            txtPotionHp = new TextBox();
+            labelPotionMp = new Label();
+            txtPotionMp = new TextBox();
+            labelPotionInterval = new Label();
+            txtPotionInterval = new TextBox();
+            btnPotionApply = new Button();
+            btnPotionStatus = new Button();
             statusStrip1 = new StatusStrip();
             toolTipPlayerCoord = new ToolStripStatusLabel();
             toolTipPlayerInfo = new ToolStripStatusLabel();
@@ -84,6 +94,7 @@ namespace WinFormsMitm
             groupBox1.SuspendLayout();
             tabPage1.SuspendLayout();
             groupBox5.SuspendLayout();
+            groupBoxPotion.SuspendLayout();
             statusStrip1.SuspendLayout();
             groupBox4.SuspendLayout();
             tabPackets.SuspendLayout();
@@ -129,7 +140,7 @@ namespace WinFormsMitm
             tabs.Margin = new Padding(2);
             tabs.Name = "tabs";
             tabs.SelectedIndex = 0;
-            tabs.Size = new Size(1772, 920);
+            tabs.Size = new Size(1053, 715);
             tabs.TabIndex = 8;
             // 
             // tabGeneral
@@ -255,12 +266,13 @@ namespace WinFormsMitm
             // tabPage1
             // 
             tabPage1.Controls.Add(groupBox5);
+            tabPage1.Controls.Add(groupBoxPotion);
             tabPage1.Controls.Add(statusStrip1);
             tabPage1.Controls.Add(groupBox4);
             tabPage1.Location = new Point(4, 24);
             tabPage1.Name = "tabPage1";
             tabPage1.Padding = new Padding(3);
-            tabPage1.Size = new Size(1764, 892);
+            tabPage1.Size = new Size(1045, 687);
             tabPage1.TabIndex = 3;
             tabPage1.Text = "Custom Stuff";
             tabPage1.UseVisualStyleBackColor = true;
@@ -279,7 +291,7 @@ namespace WinFormsMitm
             groupBox5.Controls.Add(cbSkills);
             groupBox5.Location = new Point(442, 7);
             groupBox5.Name = "groupBox5";
-            groupBox5.Size = new Size(462, 425);
+            groupBox5.Size = new Size(462, 252);
             groupBox5.TabIndex = 4;
             groupBox5.TabStop = false;
             groupBox5.Text = "Attack Config";
@@ -375,12 +387,109 @@ namespace WinFormsMitm
             cbSkills.Size = new Size(280, 23);
             cbSkills.TabIndex = 0;
             // 
+            // groupBoxPotion
+            // 
+            groupBoxPotion.Controls.Add(chkAutoPotion);
+            groupBoxPotion.Controls.Add(labelPotionHp);
+            groupBoxPotion.Controls.Add(txtPotionHp);
+            groupBoxPotion.Controls.Add(labelPotionMp);
+            groupBoxPotion.Controls.Add(txtPotionMp);
+            groupBoxPotion.Controls.Add(labelPotionInterval);
+            groupBoxPotion.Controls.Add(txtPotionInterval);
+            groupBoxPotion.Controls.Add(btnPotionApply);
+            groupBoxPotion.Controls.Add(btnPotionStatus);
+            groupBoxPotion.Location = new Point(8, 265);
+            groupBoxPotion.Name = "groupBoxPotion";
+            groupBoxPotion.Size = new Size(425, 190);
+            groupBoxPotion.TabIndex = 5;
+            groupBoxPotion.TabStop = false;
+            groupBoxPotion.Text = "Auto Potion";
+            // 
+            // chkAutoPotion
+            // 
+            chkAutoPotion.AutoSize = true;
+            chkAutoPotion.Location = new Point(11, 26);
+            chkAutoPotion.Name = "chkAutoPotion";
+            chkAutoPotion.Size = new Size(140, 19);
+            chkAutoPotion.TabIndex = 0;
+            chkAutoPotion.Text = "Auto potion (HP/MP)";
+            chkAutoPotion.UseVisualStyleBackColor = true;
+            // 
+            // labelPotionHp
+            // 
+            labelPotionHp.AutoSize = true;
+            labelPotionHp.Location = new Point(11, 66);
+            labelPotionHp.Name = "labelPotionHp";
+            labelPotionHp.Size = new Size(90, 15);
+            labelPotionHp.TabIndex = 1;
+            labelPotionHp.Text = "HP abaixo de %";
+            // 
+            // txtPotionHp
+            // 
+            txtPotionHp.Location = new Point(105, 62);
+            txtPotionHp.Name = "txtPotionHp";
+            txtPotionHp.Size = new Size(53, 23);
+            txtPotionHp.TabIndex = 2;
+            txtPotionHp.Text = "50";
+            // 
+            // labelPotionMp
+            // 
+            labelPotionMp.AutoSize = true;
+            labelPotionMp.Location = new Point(180, 66);
+            labelPotionMp.Name = "labelPotionMp";
+            labelPotionMp.Size = new Size(92, 15);
+            labelPotionMp.TabIndex = 3;
+            labelPotionMp.Text = "MP abaixo de %";
+            // 
+            // txtPotionMp
+            // 
+            txtPotionMp.Location = new Point(278, 62);
+            txtPotionMp.Name = "txtPotionMp";
+            txtPotionMp.Size = new Size(53, 23);
+            txtPotionMp.TabIndex = 4;
+            txtPotionMp.Text = "30";
+            // 
+            // labelPotionInterval
+            // 
+            labelPotionInterval.AutoSize = true;
+            labelPotionInterval.Location = new Point(11, 106);
+            labelPotionInterval.Name = "labelPotionInterval";
+            labelPotionInterval.Size = new Size(80, 15);
+            labelPotionInterval.TabIndex = 5;
+            labelPotionInterval.Text = "Intervalo (ms)";
+            // 
+            // txtPotionInterval
+            // 
+            txtPotionInterval.Location = new Point(105, 102);
+            txtPotionInterval.Name = "txtPotionInterval";
+            txtPotionInterval.Size = new Size(53, 23);
+            txtPotionInterval.TabIndex = 6;
+            txtPotionInterval.Text = "1000";
+            // 
+            // btnPotionApply
+            // 
+            btnPotionApply.Location = new Point(180, 101);
+            btnPotionApply.Name = "btnPotionApply";
+            btnPotionApply.Size = new Size(80, 25);
+            btnPotionApply.TabIndex = 7;
+            btnPotionApply.Text = "Aplicar";
+            btnPotionApply.UseVisualStyleBackColor = true;
+            // 
+            // btnPotionStatus
+            // 
+            btnPotionStatus.Location = new Point(270, 101);
+            btnPotionStatus.Name = "btnPotionStatus";
+            btnPotionStatus.Size = new Size(80, 25);
+            btnPotionStatus.TabIndex = 8;
+            btnPotionStatus.Text = "Status";
+            btnPotionStatus.UseVisualStyleBackColor = true;
+            // 
             // statusStrip1
             // 
             statusStrip1.Items.AddRange(new ToolStripItem[] { toolTipPlayerCoord, toolTipPlayerInfo });
-            statusStrip1.Location = new Point(3, 867);
+            statusStrip1.Location = new Point(3, 662);
             statusStrip1.Name = "statusStrip1";
-            statusStrip1.Size = new Size(1758, 22);
+            statusStrip1.Size = new Size(1039, 22);
             statusStrip1.TabIndex = 3;
             statusStrip1.Text = "statusStrip1";
             // 
@@ -393,7 +502,7 @@ namespace WinFormsMitm
             // toolTipPlayerInfo
             // 
             toolTipPlayerInfo.Name = "toolTipPlayerInfo";
-            toolTipPlayerInfo.Size = new Size(1708, 17);
+            toolTipPlayerInfo.Size = new Size(989, 17);
             toolTipPlayerInfo.Spring = true;
             toolTipPlayerInfo.Text = "Idx:0x0000 | Pos:(0,0) | Range:0 | Entities:0 | Monsters:0";
             // 
@@ -403,7 +512,7 @@ namespace WinFormsMitm
             groupBox4.Controls.Add(lstMonsters);
             groupBox4.Location = new Point(7, 7);
             groupBox4.Name = "groupBox4";
-            groupBox4.Size = new Size(429, 413);
+            groupBox4.Size = new Size(429, 252);
             groupBox4.TabIndex = 1;
             groupBox4.TabStop = false;
             groupBox4.Text = "Monster List";
@@ -411,6 +520,8 @@ namespace WinFormsMitm
             // chkEnableMonsterCapturing
             // 
             chkEnableMonsterCapturing.AutoSize = true;
+            chkEnableMonsterCapturing.Checked = true;
+            chkEnableMonsterCapturing.CheckState = CheckState.Checked;
             chkEnableMonsterCapturing.Location = new Point(9, 20);
             chkEnableMonsterCapturing.Name = "chkEnableMonsterCapturing";
             chkEnableMonsterCapturing.Size = new Size(164, 19);
@@ -421,11 +532,10 @@ namespace WinFormsMitm
             // lstMonsters
             // 
             lstMonsters.Columns.AddRange(new ColumnHeader[] { clmMonsterID, clmMonsterName, clmRange });
-            lstMonsters.Dock = DockStyle.Bottom;
             lstMonsters.GridLines = true;
             lstMonsters.Location = new Point(3, 45);
             lstMonsters.Name = "lstMonsters";
-            lstMonsters.Size = new Size(423, 365);
+            lstMonsters.Size = new Size(423, 201);
             lstMonsters.TabIndex = 0;
             lstMonsters.UseCompatibleStateImageBehavior = false;
             lstMonsters.View = View.Details;
@@ -452,7 +562,7 @@ namespace WinFormsMitm
             tabPackets.Margin = new Padding(2);
             tabPackets.Name = "tabPackets";
             tabPackets.Padding = new Padding(2);
-            tabPackets.Size = new Size(1764, 892);
+            tabPackets.Size = new Size(1045, 687);
             tabPackets.TabIndex = 2;
             tabPackets.Text = "Packets";
             tabPackets.UseVisualStyleBackColor = true;
@@ -466,7 +576,7 @@ namespace WinFormsMitm
             gbPacket.Margin = new Padding(2);
             gbPacket.Name = "gbPacket";
             gbPacket.Padding = new Padding(2);
-            gbPacket.Size = new Size(1760, 114);
+            gbPacket.Size = new Size(1041, 114);
             gbPacket.TabIndex = 1;
             gbPacket.TabStop = false;
             gbPacket.Text = "Packet Management";
@@ -670,10 +780,10 @@ namespace WinFormsMitm
             lvPackets.Font = new Font("Consolas", 10F, FontStyle.Bold);
             lvPackets.FullRowSelect = true;
             lvPackets.GridLines = true;
-            lvPackets.Location = new Point(2, 120);
+            lvPackets.Location = new Point(2, -85);
             lvPackets.Margin = new Padding(2);
             lvPackets.Name = "lvPackets";
-            lvPackets.Size = new Size(1760, 770);
+            lvPackets.Size = new Size(1041, 770);
             lvPackets.TabIndex = 3;
             lvPackets.UseCompatibleStateImageBehavior = false;
             lvPackets.View = View.Details;
@@ -738,7 +848,7 @@ namespace WinFormsMitm
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1772, 920);
+            ClientSize = new Size(1053, 715);
             Controls.Add(tabs);
             Margin = new Padding(2);
             Name = "MainForm";
@@ -751,6 +861,8 @@ namespace WinFormsMitm
             tabPage1.PerformLayout();
             groupBox5.ResumeLayout(false);
             groupBox5.PerformLayout();
+            groupBoxPotion.ResumeLayout(false);
+            groupBoxPotion.PerformLayout();
             statusStrip1.ResumeLayout(false);
             statusStrip1.PerformLayout();
             groupBox4.ResumeLayout(false);
@@ -829,5 +941,15 @@ namespace WinFormsMitm
         private TextBox txtRange;
         private CheckBox chkEnableAttack;
         private ToolStripStatusLabel toolTipPlayerInfo;
+        private GroupBox groupBoxPotion;
+        private CheckBox chkAutoPotion;
+        private Label labelPotionHp;
+        private TextBox txtPotionHp;
+        private Label labelPotionMp;
+        private TextBox txtPotionMp;
+        private Label labelPotionInterval;
+        private TextBox txtPotionInterval;
+        private Button btnPotionApply;
+        private Button btnPotionStatus;
     }
 }

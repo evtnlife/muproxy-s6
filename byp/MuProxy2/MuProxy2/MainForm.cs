@@ -16,6 +16,7 @@ namespace WinFormsMitm
         private HookListenerService? _hookListener;
         private MonsterService? _monsterService;
         private AttackService? _attackService;
+        private PotionService? _potionService;
 
         private TcpLoopbackProxy? _proxy;
 
@@ -87,12 +88,20 @@ namespace WinFormsMitm
                 UpdateAttackUI(enabled);
             };
 
+            _potionService = new PotionService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
+            _potionService.OnStateChanged += enabled =>
+            {
+                if (InvokeRequired) { BeginInvoke(() => chkAutoPotion.Checked = enabled); return; }
+                chkAutoPotion.Checked = enabled;
+            };
+
             _hookListener = new HookListenerService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
 
             SetupLogFilters();
             OpenLogFile();
             LogPacketCatalogStatus();
             SetupAttackControls();
+            SetupPotionControls();
             StartHookServer();
 
             // Timer para throttle do RebuildLogUI
@@ -243,6 +252,52 @@ namespace WinFormsMitm
 
             PopulateSkills(cbSkills);
             rbNormalAttack.Checked = true;
+        }
+
+        // ============ UI: Controles de auto-potion ============
+
+        private void SetupPotionControls()
+        {
+            if (_potionService == null) return;
+
+            chkAutoPotion.CheckedChanged += (s, e) =>
+            {
+                if (_potionService == null) return;
+                if (chkAutoPotion.Checked)
+                    _potionService.Start();
+                else
+                    _potionService.Stop();
+            };
+
+            txtPotionHp.TextChanged += (s, e) =>
+            {
+                if (int.TryParse(txtPotionHp.Text, out int hp) && hp >= 0 && hp <= 100 && _potionService != null)
+                {
+                    _potionService.HpThreshold = hp;
+                    _potionService.SendConfig();
+                }
+            };
+
+            txtPotionMp.TextChanged += (s, e) =>
+            {
+                if (int.TryParse(txtPotionMp.Text, out int mp) && mp >= 0 && mp <= 100 && _potionService != null)
+                {
+                    _potionService.MpThreshold = mp;
+                    _potionService.SendConfig();
+                }
+            };
+
+            txtPotionInterval.TextChanged += (s, e) =>
+            {
+                if (int.TryParse(txtPotionInterval.Text, out int ms) && ms >= 100 && _potionService != null)
+                {
+                    _potionService.IntervalMs = ms;
+                    _potionService.SendConfig();
+                }
+            };
+
+            btnPotionApply.Click += (s, e) => _potionService?.SendConfig();
+            btnPotionStatus.Click += (s, e) => _potionService?.RequestStatus();
         }
 
         // ============ UI: Skills ============

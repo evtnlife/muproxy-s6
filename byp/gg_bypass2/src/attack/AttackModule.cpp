@@ -134,9 +134,9 @@ static uint8_t ComputeDirection(uint16_t targetEntityIndex) {
 // Este buffer é o PLAINTEXT REAL. A criptografia (XorData [3,7) + Layer-1)
 // é aplicada em PacketInjector::Inject (src/packets/PacketInjector.cpp).
 static int BuildAttackPacket(uint8_t* outBuf, uint16_t entityIndex) {
-    outBuf[0] = MuOpcodes::HEADER_C1;           // 0xC1
-    outBuf[1] = MuOpcodes::SIZE_ATTACK_NORMAL;  // 0x07
-    outBuf[2] = MuOpcodes::ATTACK;               // 0x11
+    outBuf[0] = (uint8_t)MuOpcodes::HeaderType::C1;           // 0xC1
+    outBuf[1] = MuOpcodes::Size::AttackNormal;                 // 0x07
+    outBuf[2] = (uint8_t)MuOpcodes::ClientToServer::Attack;    // 0x11
     outBuf[3] = (uint8_t)((entityIndex >> 8) & 0xFF);  // D0 = targetHi (índice PURO)
     outBuf[4] = (uint8_t)(entityIndex & 0xFF);         // D1 = targetLo (índice PURO)
 
@@ -190,9 +190,9 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     // skill primeiro, depois o entity index PURO (sem 0xEFF5 — o XOR é só do 0x11).
     // Servidor lê: skill = MAKE_NUMBERW(skillH,skillL), bIndex = MAKE_NUMBERW(indexH,indexL).
     uint8_t plain[7];
-    plain[0] = MuOpcodes::HEADER_C1;               // 0xC1
-    plain[1] = 0x07;                               // size = 7 bytes total
-    plain[2] = MuOpcodes::TARGETED_SKILL;          // opcode 0x19
+    plain[0] = (uint8_t)MuOpcodes::HeaderType::C1;             // 0xC1
+    plain[1] = MuOpcodes::Size::TargetedSkill;                 // size = 7 bytes total
+    plain[2] = (uint8_t)MuOpcodes::ClientToServer::TargetedSkill; // opcode 0x19
     plain[3] = (uint8_t)((skillId >> 8) & 0xFF);   // skillH
     plain[4] = (uint8_t)(skillId & 0xFF);          // skillL
     plain[5] = (uint8_t)((entityIndex >> 8) & 0xFF); // indexH (entity index puro)
@@ -240,7 +240,7 @@ bool SendConfiguredAttack(int slotIndex) {
     if (entityIndex == 0) return false;
 
     // Envia pacote conforme tipo (skill loga em SendSkillAttack; normal sem log)
-    if (g_SessionType == MuOpcodes::ATKTYPE_SKILL) {
+    if (g_SessionType == (uint8_t)MuOpcodes::AttackType::Skill) {
         return SendSkillAttack(entityIndex, g_SessionSkillId);
     } else {
         return SendAttack(entityIndex);
@@ -267,7 +267,7 @@ static DWORD WINAPI AttackSingleMobThread(LPVOID param) {
             break;
         }
 
-        if (g_SessionType == MuOpcodes::ATKTYPE_SKILL) {
+        if (g_SessionType == (uint8_t)MuOpcodes::AttackType::Skill) {
             SendSkillAttack(p->entityIndex, g_SessionSkillId);
         } else {
             // Alvo exato: o entityIndex já é o alvo correto (validado em 24 capturas nativas).
@@ -453,7 +453,7 @@ static void HandleAttackStart(const char* payload) {
         if (CommandParams::ParseFloatParam(payload, "range", &fval) && fval > 0.0f) g_SessionRange = fval;
         if (CommandParams::ParseHexParam(payload, "skill", &hval)) {
             g_SessionSkillId = hval;
-            if (g_SessionType == 0) g_SessionType = MuOpcodes::ATKTYPE_SKILL;
+            if (g_SessionType == 0) g_SessionType = (uint8_t)MuOpcodes::AttackType::Skill;
         }
         CommandParams::ParseByteParam(payload, "type", &g_SessionType);
         if (CommandParams::ParseIntParam(payload, "hitcount", &ival) && ival >= 1) g_SessionHitCount = ival;
@@ -490,7 +490,7 @@ static void HandleAttackConfig(const char* payload) {
     if (CommandParams::ParseHexParam(payload, "skill", &hval)) {
         g_Config.defaultSkillId = hval;
         g_SessionSkillId = hval;
-        if (g_SessionType == 0) g_SessionType = MuOpcodes::ATKTYPE_SKILL;
+        if (g_SessionType == 0) g_SessionType = (uint8_t)MuOpcodes::AttackType::Skill;
     }
     if (CommandParams::ParseIntParam(payload, "hitcount", &ival) && ival >= 1) {
         g_Config.defaultHitCount = ival;

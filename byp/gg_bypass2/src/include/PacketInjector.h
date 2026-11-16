@@ -10,6 +10,7 @@
 //
 //   0x11 (ataque normal) → Layer-1 → wire (C1 puro)
 //   0x19 (skill attack)  → SM(serial + payload) → C3 0D [11] → Layer-1 → wire
+//   0x26 (uso de item)   → Layer-1 → wire (C1 puro)  [C1 06 26 <slot> <target> <type>]
 //
 // Exemplo (0x11): C1 07 11 00 1A 78 04
 //   → XorData  : C1 07 11 EF ED B6 77
@@ -19,6 +20,12 @@
 //   → XorData  : C1 07 19 E7 C3 E2 50
 //   → SM       : 11 bytes (serial 0x08793700 + payload)
 //   → C3 0D [11] → Layer-1 → wire
+//
+// Exemplo (0x26): C1 06 26 <slot> <targetSlot> <type>
+//   → XorData  : C1 06 26 <slot'> <target'> <type'>
+//   → Layer-1  → wire
+//
+// Os opcodes vivem em `MuOpcodes.h` (enum `MuOpcodes::ClientToServer`).
 //
 // O transporte (socket do game server + send original) pertence ao módulo de
 // hooks: ele registra o callback de envio via SetSender().
@@ -34,7 +41,7 @@ typedef bool (*SendFn)(const uint8_t* data, int len);
 void SetSender(SendFn fn);
 
 // Porta ÚNICA de injeção: recebe o plaintext real do pacote e escolhe o
-// pipeline pelo opcode (0x11 normal, 0x19 skill).
+// pipeline pelo opcode (0x11 normal, 0x19 skill, 0x26 uso de item).
 bool Inject(const uint8_t* plaintext, int len);
 
 // Injeta dados que JÁ estão na forma XorData (comando SEND_PACKET / "SEND"):

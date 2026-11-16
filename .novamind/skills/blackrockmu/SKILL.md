@@ -27,7 +27,8 @@ debugging) lives in the referenced file. **Read the relevant reference before ed
 | 9 | Golden rules & debugging | anti-gambiarra rules + failure-mode table. | `references/09-golden-rules-debug.md` |
 | 10 | References & meta | OpenMU packet docs, ex603 emulator, key files, open questions. | `references/10-references.md` |
 | 11 | Log analysis | single `gg_bypass2.log`; exact line formats, what's intentionally absent, debug recipes. | `references/11-log-analysis.md` |
-| 12 | Source module map | `src/` is split per domain (core/crypto/net/packets/game/attack/debug); who owns what; rules for adding a module. | `references/12-module-map.md` |
+| 12 | Source module map | `src/` is split per domain (core/crypto/net/packets/game/attack/debug/potion); who owns what; rules for adding a module. | `references/12-module-map.md` |
+| 13 | Auto potion | `C1 06 26` (uso de item), poções `GET_ITEM(14,*)`, anti-hack, learn & replay do slot. | `references/13-auto-potion.md` |
 
 ## Quick facts (most-used)
 - **Inject a normal attack:** build TRUE plaintext `C1 07 11 <idxHi> <idxLo> 78 <dir 0..7>`, call
@@ -42,5 +43,9 @@ debugging) lives in the referenced file. **Read the relevant reference before ed
 - **Logs:** one file, `F:\blackrockmu\gg_bypass2.log`. Read §11 before analyzing a session —
   normal attacks log nothing, `LogRaw` dumps no hex, and `NativeDecrypt` lines no longer exist.
 - **Source layout:** `src/` has **no loose `.cpp`** — each file lives in its domain folder
-  (`core/`, `crypto/`, `net/`, `packets/`, `game/`, `attack/`, `debug/`); headers all in
+  (`core/`, `crypto/`, `net/`, `packets/`, `game/`, `attack/`, `debug/`, `potion/`); headers all in
   `src/include/`. A new `.cpp` must be added to `build.bat` `SOURCES` or it is not linked. §12.
+- **Auto potion:** `AutoPotion` (§13) lê life/mana da memória e injeta
+  `C1 06 26 <slot> <target> <type>`; o slot é **aprendido** do pacote que o jogador
+  manda ao beber a potion (`MuCipher::UnXorData` + comparação life/mana).
+  Comandos: `POTION_START` / `POTION_STOP` / `POTION_CONFIG` / `POTION_STATUS`.

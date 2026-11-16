@@ -166,4 +166,57 @@ namespace WinFormsMitm.Protocol
         public static SendPacketMessage Parse(string payload) => new();
         public string ToWire() => $"SEND_PACKET|{Direction}|{Convert.ToHexString(Data).Replace("-", " ")}";
     }
+
+    // ================================================================
+    // Auto potion (byp.dll — módulo AutoPotion)
+    // ================================================================
+
+    /// <summary>Liga o auto-potion (bebe HP/MP abaixo do limiar).</summary>
+    [MessageTag("POTION_START")]
+    public class PotionStartMessage
+    {
+        public static PotionStartMessage Parse(string payload) => new();
+        public string ToWire() => "POTION_START|";
+    }
+
+    /// <summary>Desliga o auto-potion.</summary>
+    [MessageTag("POTION_STOP")]
+    public class PotionStopMessage
+    {
+        public static PotionStopMessage Parse(string payload) => new();
+        public string ToWire() => "POTION_STOP|";
+    }
+
+    /// <summary>
+    /// Configura o auto-potion.
+    /// HpThreshold/MpThreshold = % que dispara a potion; IntervalMs = intervalo
+    /// mínimo entre usos (anti-hack do servidor); HpSlot/MpSlot = slot do
+    /// inventário (-1 = usa o modelo aprendido pelo próprio jogo).
+    /// </summary>
+    [MessageTag("POTION_CONFIG")]
+    public class PotionConfigMessage
+    {
+        public int HpThreshold = 50;
+        public int MpThreshold = 30;
+        public int IntervalMs = 1000;
+        public int HpSlot = -1;
+        public int MpSlot = -1;
+
+        public static PotionConfigMessage Parse(string payload) => new();
+        public string ToWire()
+        {
+            string s = $"POTION_CONFIG|hp={HpThreshold}|mp={MpThreshold}|interval={IntervalMs}";
+            if (HpSlot >= 0) s += $"|hpslot={HpSlot}";
+            if (MpSlot >= 0) s += $"|mpslot={MpSlot}";
+            return s;
+        }
+    }
+
+    /// <summary>Pede o status do auto-potion (a resposta sai no log do byp.dll).</summary>
+    [MessageTag("POTION_STATUS")]
+    public class PotionStatusMessage
+    {
+        public static PotionStatusMessage Parse(string payload) => new();
+        public string ToWire() => "POTION_STATUS|";
+    }
 }

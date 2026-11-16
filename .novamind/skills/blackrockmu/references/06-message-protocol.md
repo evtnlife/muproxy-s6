@@ -22,6 +22,10 @@ Format `TAG|payload`, registered with `[MessageTag("TAG")]`, each class has a st
 | `ATTACK_SCANVALUE` | `debug/DebugScans.cpp` | `value=X` (hex) — busca o WORD em todos os slots |
 | `ATTACK_SCANSLOT` | `debug/DebugScans.cpp` | `slot=N|value=X` |
 | `ATTACK_DIRSCAN` | `debug/DebugScans.cpp` | byte de direção no player local |
+| `POTION_START` | `potion/AutoPotion.cpp` | liga o auto-potion |
+| `POTION_STOP` | `potion/AutoPotion.cpp` | desliga o auto-potion |
+| `POTION_CONFIG` | `potion/AutoPotion.cpp` | `hp=..|mp=..|interval=..|hpslot=..|mpslot=..` |
+| `POTION_STATUS` | `potion/AutoPotion.cpp` | loga o estado do auto-potion |
 | `CMD` | `net/PacketHandler.cpp` | legado `CMD|OPCODE|SUBCMD|data` (usado pelo MonsterTracker) |
 
 - The five `ATTACK_*` debug tags exist **only on the C++ side** — there is no `[MessageTag]`

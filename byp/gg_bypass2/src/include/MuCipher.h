@@ -26,6 +26,13 @@ void EncryptLayer1(char* data, int len, BYTE xorKey, BYTE subKey);
 // Tabela g_XorFilter lida do binário Main.dll em 0x7166FF20 (via x32dbg).
 void XorData(char* data, int start, int end);
 
+// Camada 2 INVERSA (decodificação): mesma conta, ordem DECRESCENTE.
+// É o que o servidor faz ao receber (PacketManager::XorData(size-1, end)).
+// Necessário para ler o payload de pacotes capturados — o Camada-2 NÃO é
+// auto-inversa in-place (o byte anterior usado é o CIFRADO), então a ordem
+// decrescente é obrigatória.
+void UnXorData(char* data, int start, int end);
+
 // Decifração completa: APENAS Camada 1 (usada para display no log).
 void FullDecrypt(char* data, int len, BYTE xorKey, BYTE subKey);
 

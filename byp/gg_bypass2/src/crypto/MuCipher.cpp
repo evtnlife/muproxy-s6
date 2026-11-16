@@ -91,6 +91,25 @@ void XorData(char* data, int start, int end)
 }
 
 // ============================================================================
+// Camada 2 INVERSA (decodificacao).
+//
+// A conta e a mesma, mas na ordem DECRESCENTE: assim o byte anterior usado
+// ainda e o CIFRADO (o Camada-2 nao e auto-inversa in-place). E exatamente o
+// que o servidor faz ao receber (PacketManager::XorData(size-1, end)).
+//
+// Exemplo (pacote de ataque 0x11):
+//   C1 07 11 EF ED B6 77  (forma Camada-2)  --UnXorData[3,7)-->  C1 07 11 00 1A 78 04
+// ============================================================================
+void UnXorData(char* data, int start, int end)
+{
+    if (start >= end) return;
+    for (int n = end - 1; n >= start; --n)
+    {
+        data[n] ^= (data[n - 1] ^ g_XorFilter[n % 32]);
+    }
+}
+
+// ============================================================================
 // Decifracao: Camada 1 (XOR+sub) — usada para display no log.
 //
 // ATENCAO (RE validada, 4 capturas): o BlackRock USa XorFilter (Camada 2) nos
@@ -98,9 +117,10 @@ void XorData(char* data, int start, int end)
 //   WIRE = Layer1( XorData[3,7)( plaintext ) )
 // Decifrar SO com Layer-1 (esta funcao) devolve a forma XorData
 // (ex.: "C1 07 11 EF ED B6 77"), NAO o plaintext real ("C1 07 11 00 1A 78 04").
-// Para o plaintext real, decifre Layer-1 e depois aplique XorData
-// (que e sua propria inversa) em [3, len).
-// O uso de XorData em outros opcodes C1 (ex.: movimento D4) ainda nao confirmado.
+// Para o plaintext real, decifre Layer-1 e depois aplique UnXorData em [3, len)
+// (o Camada-2 NAO e auto-inverso in-place: a ordem tem que ser decrescente).
+// O Camada-2 e aplicado a TODO pacote C1 do cliente para o servidor (o
+// SocketManager do servidor decodifica [3,size) em ordem decrescente).
 // ============================================================================
 void FullDecrypt(char* data, int len, BYTE xorKey, BYTE subKey)
 {

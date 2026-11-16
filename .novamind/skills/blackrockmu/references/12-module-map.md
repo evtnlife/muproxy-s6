@@ -21,7 +21,8 @@ src/
 ├── game/                        MonsterTracker, ViewportMap, SkillMap, SkillHook
 │   └── GameMemory/              Globals, Object, Player
 ├── attack/                      AttackModule
-└── debug/                       DebugTools, DebugScans
+├── debug/                       DebugTools, DebugScans
+└── potion/                      AutoPotion
 ```
 
 ## Hard rules of the layout
@@ -66,6 +67,7 @@ src/
 | `GameMemory::Globals/Object/Player` | `game/GameMemory/*.cpp` | main.exe/Main.dll bases, object array access, local player. |
 | `AttackModule` | `attack/AttackModule.cpp` | Auto-attack loop, `BuildAttackPacket`, `SendAttack`, `SendSkillAttack`. |
 | `DebugTools` / `DebugScans` | `debug/DebugTools.cpp`, `debug/DebugScans.cpp` | RE tools (dump/hexdump/scan). Log tag stays `ATTACK` so log lines are unchanged. |
+| `AutoPotion` | `potion/AutoPotion.cpp` | Auto potion (HP/MP): lê life/mana da memória, injeta o pacote de uso de item `C1 06 26`. Ver §13. |
 
 ## Data flow of an injected packet
 
@@ -77,6 +79,7 @@ PacketInjector::Inject(plaintext, len)          ← porta ÚNICA
         │  MuCipher::XorData(data, 3, len)        ← Camada-2, aplicada 1× só
         │  opcode 0x11 → Layer-1
         │  opcode 0x19 → SM(serial+payload) → C3 0D [11] → Layer-1
+        │  opcode 0x26 → Layer-1                  (uso de item/potion, §13)
         ▼
 GameServerConnection::SendToGameServer(cipher)   ← dono do socket do GS
         ▼

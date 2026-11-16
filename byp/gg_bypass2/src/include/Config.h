@@ -41,4 +41,10 @@ constexpr float ATTACK_DEFAULT_RANGE = 0.0f;
 constexpr int ATTACK_DEFAULT_TYPE = 0;
 constexpr int ATTACK_DEFAULT_SKILL_ID = 0;
 
+// --- Auto Potion (bebe HP/MP automaticamente) ---
+constexpr bool AUTO_POTION_ENABLED = true;
+constexpr int AUTO_POTION_DEFAULT_HP_THRESHOLD = 50;   // % de life
+constexpr int AUTO_POTION_DEFAULT_MP_THRESHOLD = 30;   // % de mana
+constexpr int AUTO_POTION_DEFAULT_INTERVAL_MS  = 1000; // intervalo minimo entre usos (anti-hack)
+
 } // namespace Config

@@ -15,6 +15,7 @@
 #include "PacketSniffer.h"
 #include "Logger.h"
 #include "MuCipher.h"
+#include "MuOpcodes.h"
 #include "ViewportMap.h"
 #include "SkillMap.h"
 #include "PacketReassembler.h"
@@ -24,6 +25,7 @@
 #include "CommandChannel.h"
 #include "GameServerConnection.h"
 #include "WinsockHooks.h"
+#include "AutoPotion.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -67,15 +69,23 @@ static void OnReassembledPacket(void* ctx, const uint8_t* data, int len)
         int hdr = MuCipher::GetMuHeaderSize((BYTE)outBuf[0]);
         if (hdr > 0 && copyLen > hdr) {
             BYTE opcode = (BYTE)outBuf[hdr];
-            if (opcode == 0x13) {
+            if (opcode == (BYTE)MuOpcodes::ServerToClient::ObjectList) {
                 ViewportMap::OnViewportPacket((const uint8_t*)outBuf, copyLen);
-            } else if (opcode == 0xF3 && copyLen > hdr + 1) {
+            } else if (opcode == (BYTE)MuOpcodes::ServerToClient::SkillList && copyLen > hdr + 1) {
                 BYTE sub = (BYTE)outBuf[hdr + 1];
                 if (sub == 0x11 || sub == 0xE2) {
                     SkillMap::OnSkillListPacket((const uint8_t*)outBuf, copyLen);
                 }
             }
         }
+    }
+
+    // Auto-potion: o JOGADOR usou um item (C1 06 26). O módulo de potion
+    // decodifica o payload (Camada-2 inversa) e guarda o modelo para replay.
+    // Só na direção de SAÍDA (o que o cliente mandou).
+    if (c->dir && c->dir[0] == 'S' && outBuf[0] == (BYTE)MuOpcodes::HeaderType::C1
+        && copyLen >= 6 && outBuf[2] == (BYTE)MuOpcodes::ClientToServer::ItemUse) {
+        AutoPotion::OnItemUsePacket((const uint8_t*)outBuf, 6);
     }
 
     // Envia ao proxy (UM pacote por linha PKT|dir|hex)

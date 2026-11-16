@@ -6,6 +6,7 @@
 #include <PacketHandler.h>
 #include <MonsterTracker.h>
 #include <AttackModule.h>
+#include <AutoPotion.h>
 #include <SkillHook.h>
 
 static HANDLE g_hInitThread = NULL;
@@ -136,6 +137,9 @@ static void SafeInitialize(HMODULE hModule) {
         if (Config::ATTACK_MODULE_ENABLED) {
             AttackModule::Initialize();
         }
+        if (Config::AUTO_POTION_ENABLED) {
+            AutoPotion::Initialize();
+        }
     }
 
     // Hook de debug: loga o buffer da skill antes da criptografia/envio
@@ -182,6 +186,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
         case DLL_PROCESS_DETACH:
             if (Config::MONSTER_TRACKER_ENABLED) MonsterTracker::Shutdown();
             if (Config::ATTACK_MODULE_ENABLED) AttackModule::Shutdown();
+            if (Config::AUTO_POTION_ENABLED) AutoPotion::Shutdown();
             PacketHandler::Shutdown();
             CommandChannel::Shutdown();
             PacketSniffer::Uninstall();

@@ -10,8 +10,9 @@
 - MuProxy2's own C# logs go to `F:\blackrockmu\logs\` (subfolder) — different thing, no conflict.
 - Line format (`Logger::Log`): `[YYYY-MM-DD HH:MM:SS] [TAG] message`.
 - Tags in use: `PACKETSNIFFER` (hooks + injection), `ATTACK` (attack module **and** the debug
-  tools), `SMOD` (SimpleModulus cipher), `PACKETHANDLER` (inbound line dispatch), `MONSTER`
-  (tracker), `GAMEMEMORY` (bases/globals), `VIEWPORT`, `SKILLMAP`, `SKILLHOOK`, `SMODHOOK`.
+  tools), `POTION` (auto-potion), `SMOD` (SimpleModulus cipher), `PACKETHANDLER` (inbound line
+  dispatch), `MONSTER` (tracker), `GAMEMEMORY` (bases/globals), `VIEWPORT`, `SKILLMAP`,
+  `SKILLHOOK`, `SMODHOOK`.
 - `Logger::LogPacket` / `LogPacketDual` (the old `hex=... dec=...` formats) are currently
   **dead code** — no callers. Do not expect `hex=/dec=` lines in the log.
 
@@ -96,6 +97,19 @@ the field-verification recipe (`InjectSkillC1: after XorData [...]`) keeps worki
   `==== SCANVALUE 0x.. ====` / `==== FIM SCANVALUE ====`,
   `==== SCANSLOT slot=.. … search=0x.. ====` / `==== FIM SCANSLOT ====`,
   `==== DIRSCAN player=0x.. idx=0x.. slot=.. name='..' ====`.
+
+## POTION tag (auto-potion — see §13)
+```
+[POTION] uso de item observado (cliente): slot=25 target=0xFF type=0x00
+[POTION] modelo de HP aprendido (slot=25)
+[POTION] potion de HP disparada em 38% (slot=25) — uso injetado
+[POTION] estado: LIGADO | hp<50% mp<30% intervalo=1000ms | modelo HP=ok (slot 25) | ...
+```
+- `uso de item observado` = o **jogador** bebeu a potion (é assim que o módulo
+  descobre o slot do inventário);
+- `modelo de HP/MP aprendido` = o efeito (life/mana subindo) confirmou o tipo;
+- `potion de ... disparada` = o auto-potion injetou o uso (o `PacketInjector` também
+  loga `Inject: uso de item C1 26 [...]` na tag `PACKETSNIFFER`).
 
 ## Other one-shot / event lines
 - `Chaves: xor=0x36 sub=0x07 (mem: xor=.. sub=..)` — Layer-1 keys, logged once. If the
