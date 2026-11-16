@@ -191,7 +191,9 @@ namespace WinFormsMitm.Protocol
     /// Configura o auto-potion.
     /// HpThreshold/MpThreshold = % que dispara a potion; IntervalMs = intervalo
     /// mínimo entre usos (anti-hack do servidor); HpSlot/MpSlot = slot do
-    /// inventário (-1 = usa o modelo aprendido pelo próprio jogo).
+    /// inventário (-1 = usa o modelo aprendido pelo próprio jogo);
+    /// HpItemId/MpItemId = ID do item da potion (hex) — o byp resolve o slot
+    /// pela lista de inventário que o servidor manda (F3 10).
     /// </summary>
     [MessageTag("POTION_CONFIG")]
     public class PotionConfigMessage
@@ -201,6 +203,8 @@ namespace WinFormsMitm.Protocol
         public int IntervalMs = 1000;
         public int HpSlot = -1;
         public int MpSlot = -1;
+        public int HpItemId = -1;
+        public int MpItemId = -1;
 
         public static PotionConfigMessage Parse(string payload) => new();
         public string ToWire()
@@ -208,6 +212,8 @@ namespace WinFormsMitm.Protocol
             string s = $"POTION_CONFIG|hp={HpThreshold}|mp={MpThreshold}|interval={IntervalMs}";
             if (HpSlot >= 0) s += $"|hpslot={HpSlot}";
             if (MpSlot >= 0) s += $"|mpslot={MpSlot}";
+            if (HpItemId >= 0) s += $"|hpitem={HpItemId:X4}";
+            if (MpItemId >= 0) s += $"|mpitem={MpItemId:X4}";
             return s;
         }
     }
@@ -218,5 +224,34 @@ namespace WinFormsMitm.Protocol
     {
         public static PotionStatusMessage Parse(string payload) => new();
         public string ToWire() => "POTION_STATUS|";
+    }
+
+    /// <summary>
+    /// Aplica a configuração E liga o auto-potion em UMA mensagem só
+    /// (botão "Aplicar"). Antes a UI mandava POTION_STOP -> POTION_CONFIG ->
+    /// POTION_START a cada clique, e o módulo ficava meio-morto: o usuário
+    /// precisava clicar em "Aplicar" para o auto-potion voltar a funcionar.
+    /// </summary>
+    [MessageTag("POTION_APPLY")]
+    public class PotionApplyMessage
+    {
+        public int HpThreshold = 50;
+        public int MpThreshold = 30;
+        public int IntervalMs = 1000;
+        public int HpSlot = -1;
+        public int MpSlot = -1;
+        public int HpItemId = -1;
+        public int MpItemId = -1;
+
+        public static PotionApplyMessage Parse(string payload) => new();
+        public string ToWire()
+        {
+            string s = $"POTION_APPLY|hp={HpThreshold}|mp={MpThreshold}|interval={IntervalMs}";
+            if (HpSlot >= 0) s += $"|hpslot={HpSlot}";
+            if (MpSlot >= 0) s += $"|mpslot={MpSlot}";
+            if (HpItemId >= 0) s += $"|hpitem={HpItemId:X4}";
+            if (MpItemId >= 0) s += $"|mpitem={MpItemId:X4}";
+            return s;
+        }
     }
 }

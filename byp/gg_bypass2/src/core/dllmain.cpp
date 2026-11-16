@@ -38,6 +38,12 @@ static void LogExceptionInfo(const char* source, EXCEPTION_POINTERS* ep) {
         GetModuleFileNameA(hMod, modName, sizeof(modName));
     }
     Logger::Log("CRASH", "  Module: %s", modName);
+    // Base do módulo + RVA do EIP: com isso o offset é localizável direto
+    // (EIP - base = RVA dentro do byp.dll).
+    if (hMod) {
+        uintptr_t rva = (uintptr_t)er->ExceptionAddress - (uintptr_t)hMod;
+        Logger::Log("CRASH", "  ModuleBase: 0x%08X  EIP_RVA: 0x%08X", (uintptr_t)hMod, rva);
+    }
     
     // Registros x86
     Logger::Log("CRASH", "  EAX=0x%08X EBX=0x%08X ECX=0x%08X EDX=0x%08X",

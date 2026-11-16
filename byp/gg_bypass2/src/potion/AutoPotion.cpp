@@ -15,8 +15,11 @@
 #include "AutoPotion.h"
 #include "MuOpcodes.h"
 #include "MuCipher.h"
+#include "SimpleModulusCipher.h"
 #include "PacketInjector.h"
+#include "PacketDiag.h"
 #include "GameMemory/Player.h"
+#include "GameMemory/ClientVitals.h"
 #include "MessageRegistry.h"
 #include "CommandParams.h"
 #include "Config.h"
@@ -29,7 +32,7 @@ namespace AutoPotion {
 
 // ---- Parâmetros do watcher ----
 static constexpr int TICK_MS            = 100;  // periodicidade da leitura de life/mana
-static constexpr int PENDING_TIMEOUT_MS = 400;  // espera o efeito chegar p/ classificar o modelo
+static constexpr int PENDING_TIMEOUT_MS = 3000; // espera o efeito chegar p/ classificar o modelo
 
 // ---- Estado global ----
 static HANDLE g_hThread = nullptr;
@@ -52,15 +55,195 @@ static uint8_t g_mpModel[6] = { 0 };
 static bool g_hpModelValid = false;
 static bool g_mpModelValid = false;
 
+// Inventário do personagem (pacote F3 10 do servidor): slot → ID do item.
+// Permite configurar a potion pelo ID do item em vez do slot.
+#define INVENTORY_SLOTS 256
+static int g_slotItemId[INVENTORY_SLOTS];     // -1 = sem item
+static int g_itemListCount = 0;
+
 // Uso observado pelo cliente (aguardando o efeito para classificar)
 static bool     g_pendingValid = false;
 static uint8_t  g_pendingModel[6] = { 0 };
-static uint16_t g_pendingLife = 0;
-static uint16_t g_pendingMana = 0;
+static unsigned g_pendingLife = 0;      // valor ANTES do uso
+static unsigned g_pendingMana = 0;
+static unsigned g_pendingPeakLife = 0;  // MÁXIMO visto durante a janela
+static unsigned g_pendingPeakMana = 0;
 static DWORD    g_pendingTick = 0;
 
 // Último uso injetado (controle do intervalo / anti-hack)
 static DWORD g_lastUseTick = 0;
+
+// ============================================================================
+// Fontes de vitais (S→C). Cada uma guarda o tick de CHEGADA: o módulo usa
+// sempre o valor MAIS RECENTE, nunca um snapshot velho.
+//
+//  1) C1 26 / C1 27 (update de life/mana). O byte "type" diz o que o valor
+//     significa (servidor eMU, GCLifeSend/GCManaSend):
+//        0xFF → vida/mana ATUAL
+//        0xFE → vida/mana MÁXIMA   ⚠️ NÃO é a vida atual!
+//        0xFD → vida atual (truncada em BYTE pelo servidor)
+//     Tratar o 0xFE como "vida atual" prende a vida no máximo e o auto-potion
+//     nunca mais dispara — foi exatamente o bug do "parou de funcionar":
+//     o log mostrava "trafego: life=214" (o máximo) com o personagem a 4 HP.
+//  2) F3 E1 (character calc): snapshot do servidor com ATUAL + MÁXIMO.
+// ============================================================================
+static unsigned g_netLife = 0, g_netMana = 0;
+static DWORD    g_netLifeTick = 0, g_netManaTick = 0;
+static bool     g_netLifeValid = false, g_netManaValid = false;
+
+// Máximos vistos em pacotes type 0xFE (o servidor manda o max do personagem).
+static unsigned g_netMaxLife = 0, g_netMaxMana = 0;
+
+// Snapshot do servidor (F3 E1 / F3 E0): atual + máximo + tick de chegada.
+static unsigned g_charLife = 0, g_charMaxLife = 0;
+static unsigned g_charMana = 0, g_charMaxMana = 0;
+static DWORD    g_charTick = 0;
+static bool     g_charStatsValid = false;
+
+// Motivo da última vez que o limiar foi atingido e a potion NÃO saiu
+// (mostrado no log para o usuário não ficar no escuro).
+enum class BlockReason { None, NoModel, Interval, NoVitals, InjectFailed };
+static BlockReason g_lastBlock = BlockReason::None;
+static int         g_blockCount = 0;
+
+// Histórico curto do life/mana/BP/escudo vindos da rede. Serve como
+// ASSINATURA para localizar os globals da HUD no main.exe (ViewCurHP/
+// ViewMaxHP/ViewCurMP/ViewMaxMP/ViewCurBP/ViewCurSD): o cliente aplica o
+// pacote um passo atrás do sniffer, então qualquer valor recente serve.
+static GameMemory::Player::ClientVitalsHints g_hints;
+
+static void PushHint(unsigned* hints, int& count, int cap, unsigned value)
+{
+    for (int i = cap - 1; i > 0; i--) hints[i] = hints[i - 1];
+    hints[0] = value;
+    if (count < cap) count++;
+}
+
+// ============================================================================
+// Vitals — life/mana do jogador local.
+//
+// Fontes (nenhuma delas pode derrubar o jogo — todas com SEH):
+//   1) ObjectCharacter em memória (life/mana/maxLife/maxMana)
+//   2) PartyList slot 0 (o jogador local): life/maxLife
+//   3) Tráfego do servidor (C1 26 / C1 27): valor ATUAL
+// ============================================================================
+struct Vitals {
+    unsigned life = 0, maxLife = 0, mana = 0, maxMana = 0;
+    int lifePct = -1;                       // % direto da party list (-1 = sem)
+    bool haveLife = false, haveMana = false;
+    const char* source = "nenhum";
+};
+
+static Vitals ReadVitals()
+{
+    Vitals v;
+
+    // ---- (1) CLIENTE: os globals da HUD do main.exe ----
+    // ViewCurHP / ViewMaxHP / ViewCurMP / ViewMaxMP. É a fonte mais completa
+    // (traz o MÁXIMO, que o servidor BlackRock não manda em nenhum pacote)
+    // e não tem o atraso da rede.
+    unsigned cLife = 0, cMaxLife = 0, cMana = 0, cMaxMana = 0;
+    if (GameMemory::Player::ReadClientVitals(cLife, cMaxLife, cMana, cMaxMana)) {
+        v.life = cLife;  v.maxLife = cMaxLife;
+        v.mana = cMana;  v.maxMana = cMaxMana;
+        v.haveLife = true;
+        v.haveMana = true;
+        v.source = "cliente";
+        int pct = GameMemory::Player::PartyLifePercent(0);
+        if (pct >= 0) v.lifePct = pct;
+        return v;
+    }
+
+    // ---- (2) SERVIDOR — character calc (F3 E1 / F3 E0): atual + máximo ----
+    unsigned maxLife = g_charStatsValid ? g_charMaxLife : 0;
+    unsigned maxMana = g_charStatsValid ? g_charMaxMana : 0;
+    if (g_netMaxLife > maxLife) maxLife = g_netMaxLife;
+    if (g_netMaxMana > maxMana) maxMana = g_netMaxMana;
+
+    // ---- ATUAL: o valor mais RECENTE entre o calc e o update de tráfego ----
+    unsigned life = 0, mana = 0;
+    DWORD lifeTick = 0, manaTick = 0;
+    bool haveLife = false, haveMana = false;
+
+    if (g_charStatsValid) {
+        life = g_charLife; lifeTick = g_charTick; haveLife = true;
+        mana = g_charMana; manaTick = g_charTick; haveMana = true;
+    }
+    if (g_netLifeValid && (!haveLife || g_netLifeTick >= lifeTick)) {
+        life = g_netLife; lifeTick = g_netLifeTick; haveLife = true;
+    }
+    if (g_netManaValid && (!haveMana || g_netManaTick >= manaTick)) {
+        mana = g_netMana; manaTick = g_netManaTick; haveMana = true;
+    }
+
+    // ---- FALLBACK: memória do jogo (ObjectCharacter / PartyList) ----
+    if (!haveLife && GameMemory::Player::UserObject()) {
+        life    = GameMemory::Player::Life();
+        maxLife = GameMemory::Player::MaxLife();
+        haveLife = (maxLife > 0);
+        if (v.source[0] == 'n') v.source = "memoria";
+    }
+    if (!haveMana && GameMemory::Player::UserObject()) {
+        mana    = GameMemory::Player::Mana();
+        maxMana = GameMemory::Player::MaxMana();
+        haveMana = (maxMana > 0);
+    }
+    if (!haveLife) {
+        int pmax = GameMemory::Player::PartyMaxLife(0);
+        if (pmax > 0) {
+            life = (unsigned)GameMemory::Player::PartyLife(0);
+            maxLife = (unsigned)pmax;
+            haveLife = true;
+            if (v.source[0] == 'n') v.source = "party-list";
+        }
+    }
+
+    v.life = life;  v.maxLife = maxLife;
+    v.mana = mana;  v.maxMana = maxMana;
+    v.haveLife = haveLife && maxLife > 0;
+    v.haveMana = haveMana && maxMana > 0;
+    if (v.source[0] == 'n') v.source = "servidor";
+
+    int pct = GameMemory::Player::PartyLifePercent(0);
+    if (pct >= 0) v.lifePct = pct;
+
+    return v;
+}
+
+// Diagnóstico das fontes (a cada 30s — o log principal pode ser limpo)
+static void LogSourcesOnce()
+{
+    static DWORD lastLog = 0;
+    const DWORD now = GetTickCount();
+    if (lastLog != 0 && now - lastLog < 30000) return;
+    lastLog = now;
+
+    uintptr_t uo = GameMemory::Player::UserObject();
+    int pmax = GameMemory::Player::PartyMaxLife(0);
+    int plife = GameMemory::Player::PartyLife(0);
+    int pct = GameMemory::Player::PartyLifePercent(0);
+    Vitals v = ReadVitals();
+
+    const int hpPct = (v.maxLife > 0) ? (int)((v.life * 100) / v.maxLife) : -1;
+    const int mpPct = (v.maxMana > 0) ? (int)((v.mana * 100) / v.maxMana) : -1;
+
+    unsigned cLife = 0, cMaxLife = 0, cMana = 0, cMaxMana = 0;
+    const bool haveClient = GameMemory::Player::ReadClientVitals(cLife, cMaxLife, cMana, cMaxMana);
+
+    Logger::Log("POTION", "fontes: objChar=%p | party: life=%d maxLife=%d pct=%d | "
+                          "trafego: life=%u(%d,%dms) mana=%u(%d,%dms) max=%u/%u | "
+                          "calc: life=%u/%u mana=%u/%u(%d,%dms) | "
+                          "cliente: %s | DECISAO: life=%u/%u (%d%%) mana=%u/%u (%d%%)",
+        (void*)uo,
+        plife, pmax, pct,
+        g_netLife, g_netLifeValid ? 1 : 0, (int)(now - g_netLifeTick),
+        g_netMana, g_netManaValid ? 1 : 0, (int)(now - g_netManaTick),
+        g_netMaxLife, g_netMaxMana,
+        g_charLife, g_charMaxLife, g_charMana, g_charMaxMana,
+        g_charStatsValid ? 1 : 0, (int)(now - g_charTick),
+        haveClient ? "SIM" : "nao",
+        v.life, v.maxLife, hpPct, v.mana, v.maxMana, mpPct);
+}
 
 // ============================================================================
 // Monta o pacote de uso de item (6 bytes, plaintext).
@@ -72,14 +255,21 @@ static bool BuildItemUsePacket(bool isHp, uint8_t* outPacket)
 {
     int slot = isHp ? g_Config.hpSlot : g_Config.mpSlot;
 
-    // Slot configurado à mão: monta o pacote (TargetSlot 0xFF e type 0 — o
-    // servidor só usa TargetSlot para Fruit e rejeita TargetSlot == SourceSlot).
+    // Sem slot manual: resolve pelo ID do item (tabela montada com o pacote
+    // de inventário F3 10 que o servidor manda no login).
+    if (slot < 0) {
+        int itemId = isHp ? g_Config.hpItemId : g_Config.mpItemId;
+        if (itemId >= 0) slot = FindSlotByItemId(itemId);
+    }
+
+    // Slot configurado à mão: monta o pacote (TargetSlot 0x00 e type 0 — é o que
+    // o jogo envia, captura 18:51:47: C1 06 26 <slot> 00 00).
     if (slot >= 0) {
         outPacket[0] = (uint8_t)MuOpcodes::HeaderType::C1;
         outPacket[1] = MuOpcodes::Size::ItemUse;
         outPacket[2] = (uint8_t)MuOpcodes::ClientToServer::ItemUse;
         outPacket[3] = (uint8_t)slot;
-        outPacket[4] = 0xFF;
+        outPacket[4] = 0x00;
         outPacket[5] = 0x00;
         return true;
     }
@@ -101,51 +291,106 @@ static bool UsePotion(bool isHp, int percent)
 {
     DWORD now = GetTickCount();
     if (now - g_lastUseTick < (DWORD)g_Config.intervalMs) {
+        g_lastBlock = BlockReason::Interval;
         return false;   // ainda dentro do intervalo mínimo
     }
 
     uint8_t packet[6];
     if (!BuildItemUsePacket(isHp, packet)) {
+        g_lastBlock = BlockReason::NoModel;
+        static int warnHp = 0, warnMp = 0;
+        int& warn = isHp ? warnHp : warnMp;
+        if (warn < 2) {
+            warn++;
+            Logger::Log("POTION", "sem potion de %s disponível: configure hpitem/mpitem (ID hex) "
+                                  "ou beba a potion uma vez no jogo para o byp aprender o slot",
+                        isHp ? "HP" : "MP");
+        }
         return false;   // sem modelo aprendido e sem slot configurado
     }
 
     if (!PacketInjector::Inject(packet, 6)) {
+        g_lastBlock = BlockReason::InjectFailed;
         Logger::Log("POTION", "falha ao injetar o uso de item (slot=%u)", packet[3]);
         return false;
     }
 
     g_lastUseTick = now;
+    g_lastBlock = BlockReason::None;
     Logger::Log("POTION", "%s disparada em %d%% (slot=%u) — uso injetado",
                 isHp ? "potion de HP" : "potion de MP", percent, packet[3]);
     return true;
 }
 
 // ============================================================================
-// Resolve o modelo observado: se o life subiu, o modelo é de HP; se o mana
-// subiu, é de MP. (Chamado pelo watcher, fora da thread do hook.)
+// ResolvePendingModel: classifica o modelo observado como HP ou MP.
+//
+// Uma potion de verdade provoca um SALTO grande nos vitais (o servidor
+// restaura 30~100% do máximo — CharacterUsePotion). Regeneração, dano ou
+// outro item mudam poucos pontos: sem um limiar mínimo o "learn" classificava
+// a potion de MP como sendo de HP (o life subiu 1 ponto por regeneração) e
+// o byp passava a beber a potion errada.
+//
+// A classificação é tentada a CADA tick (o efeito pode chegar a qualquer
+// momento); o timeout só encerra a espera sem classify.
 // ============================================================================
 static void ResolvePendingModel()
 {
     if (!g_pendingValid) return;
 
-    DWORD now = GetTickCount();
-    if (now - g_pendingTick < (DWORD)PENDING_TIMEOUT_MS) return;   // efeito ainda não chegou
+    const DWORD now = GetTickCount();
+    const Vitals v = ReadVitals();
 
-    uint16_t life = GameMemory::Player::Life();
-    uint16_t mana = GameMemory::Player::Mana();
+    // 5% do máximo (mínimo de 3 pontos) = salto de potion.
+    unsigned minLifeDelta = (v.maxLife > 0) ? (v.maxLife / 20) : 3;
+    unsigned minManaDelta = (v.maxMana > 0) ? (v.maxMana / 20) : 3;
+    if (minLifeDelta < 3) minLifeDelta = 3;
+    if (minManaDelta < 3) minManaDelta = 3;
+
+    // O PICO (máximo) durante a janela, e não o valor final: se o jogador
+    // toma dano / gasta mana no mesmo instante em que bebe a potion, o valor
+    // final esconde o efeito. O pico prova que a potion foi aplicada.
+    unsigned beforeLife = 0, beforeMana = 0, peakLife = 0, peakMana = 0;
+    uint8_t slot = 0;
+    {
+        EnterCriticalSection(&g_Lock);
+        beforeLife = g_pendingLife;
+        beforeMana = g_pendingMana;
+        if (v.life > g_pendingPeakLife) g_pendingPeakLife = v.life;
+        if (v.mana > g_pendingPeakMana) g_pendingPeakMana = v.mana;
+        peakLife = g_pendingPeakLife;
+        peakMana = g_pendingPeakMana;
+        slot = g_pendingModel[3];
+        LeaveCriticalSection(&g_Lock);
+    }
+
+    const bool hpUp = v.haveLife && peakLife >= beforeLife + minLifeDelta;
+    const bool mpUp = v.haveMana && peakMana >= beforeMana + minManaDelta;
+
+    if (!hpUp && !mpUp) {
+        // Sem salto relevante ainda — só desiste depois do timeout.
+        if (now - g_pendingTick < (DWORD)PENDING_TIMEOUT_MS) return;
+        Logger::Log("POTION", "uso observado sem efeito relevante (slot=%u): life %u->%u (pico %u), "
+                              "mana %u->%u (pico %u) — precisa de +%u/+%u. "
+                              "Beba a potion com o recurso ABAIXO do máximo para o byp aprender.",
+                    slot, beforeLife, v.life, peakLife, beforeMana, v.mana, peakMana,
+                    minLifeDelta, minManaDelta);
+        g_pendingValid = false;
+        return;
+    }
 
     EnterCriticalSection(&g_Lock);
-    if (life > g_pendingLife) {
+    if (hpUp && !mpUp) {
         memcpy(g_hpModel, g_pendingModel, 6);
         g_hpModelValid = true;
         Logger::Log("POTION", "modelo de HP aprendido (slot=%u)", g_hpModel[3]);
-    } else if (mana > g_pendingMana) {
+    } else if (mpUp && !hpUp) {
         memcpy(g_mpModel, g_pendingModel, 6);
         g_mpModelValid = true;
         Logger::Log("POTION", "modelo de MP aprendido (slot=%u)", g_mpModel[3]);
     } else {
-        Logger::Log("POTION", "uso observado sem efeito em life/mana (slot=%u) — não classificado",
-                    g_pendingModel[3]);
+        Logger::Log("POTION", "uso observado com life E mana subindo (slot=%u) — ambíguo, "
+                              "mantido o modelo anterior", slot);
     }
     g_pendingValid = false;
     LeaveCriticalSection(&g_Lock);
@@ -156,22 +401,86 @@ static void ResolvePendingModel()
 // ============================================================================
 static void CheckThresholds()
 {
-    uint16_t life    = GameMemory::Player::Life();
-    uint16_t maxLife = GameMemory::Player::MaxLife();
-    uint16_t mana    = GameMemory::Player::Mana();
-    uint16_t maxMana = GameMemory::Player::MaxMana();
+    LogSourcesOnce();
 
-    if (!maxLife || !maxMana) return;   // sem player object (ainda nao logado)
-    if (life == 0) return;               // morto: o servidor ignora (DieRegen)
+    // Procura (uma vez a cada 5s até achar) os globals da HUD no main.exe:
+    // é a única fonte do MÁXIMO de life/mana nesse servidor.
+    if (!GameMemory::Player::HasClientVitals() &&
+        g_hints.lifeCount > 0 && g_hints.manaCount > 0) {
+        static DWORD lastScan = 0;
+        const DWORD now = GetTickCount();
+        if (lastScan == 0 || now - lastScan >= 5000) {
+            lastScan = now;
+            GameMemory::Player::ScanClientVitals(g_hints);
+        }
+    }
 
-    int hpPercent = (int)((life * 100) / maxLife);
-    int mpPercent = (int)((mana * 100) / maxMana);
+    Vitals v = ReadVitals();
+    if (!v.haveLife && !v.haveMana) {
+        g_lastBlock = BlockReason::NoVitals;
+        static int warn = 0;
+        if (warn < 3) {
+            warn++;
+            Logger::Log("POTION", "sem vitais do jogador (life/mana indisponíveis) — "
+                                  "aguardando os pacotes do servidor");
+        }
+        return;   // sem dados do jogador
+    }
 
-    if (hpPercent < g_Config.hpThreshold) {
+    // %: calculado a partir da fonte mais recente do servidor.
+    // (A party list do jogo não é confiável neste cliente — o slot 0 vem
+    //  zerado — então ela só entra como último recurso.)
+    int hpPercent = 100;
+    if (v.haveLife && v.maxLife > 0) hpPercent = (int)((v.life * 100) / v.maxLife);
+    else if (v.haveLife && v.lifePct >= 0) hpPercent = v.lifePct;
+    else if (v.haveLife) {
+        static int warn = 0;
+        if (warn < 3) {
+            warn++;
+            Logger::Log("POTION", "life=%u conhecido mas maxLife DESCONHECIDO — "
+                                  "%% não pode ser calculado", v.life);
+        }
+    }
+
+    int mpPercent = 100;
+    if (v.haveMana && v.maxMana > 0) mpPercent = (int)((v.mana * 100) / v.maxMana);
+    else if (v.haveMana) {
+        static int warn = 0;
+        if (warn < 3) {
+            warn++;
+            Logger::Log("POTION", "mana=%u conhecido mas maxMana DESCONHECIDO", v.mana);
+        }
+    }
+
+    g_lastBlock = BlockReason::None;
+    bool tried = false;
+
+    if (v.haveLife && hpPercent < g_Config.hpThreshold) {
+        tried = true;
         if (UsePotion(true, hpPercent)) return;   // uma potion por vez
     }
-    if (mpPercent < g_Config.mpThreshold) {
-        UsePotion(false, mpPercent);
+    if (v.haveMana && mpPercent < g_Config.mpThreshold) {
+        tried = true;
+        if (UsePotion(false, mpPercent)) return;
+    }
+
+    // O limiar foi atingido mas a potion NÃO saiu — diz o porquê (a cada 5s).
+    if (tried && g_lastBlock != BlockReason::None) {
+        static DWORD lastLog = 0;
+        const DWORD now = GetTickCount();
+        if (lastLog == 0 || now - lastLog >= 5000) {
+            lastLog = now;
+            const char* why = "?";
+            switch (g_lastBlock) {
+                case BlockReason::NoModel:      why = "sem modelo de potion aprendido"; break;
+                case BlockReason::Interval:     why = "dentro do intervalo mínimo entre usos"; break;
+                case BlockReason::InjectFailed: why = "falha na injecao do pacote"; break;
+                case BlockReason::NoVitals:     why = "sem vitais do jogador"; break;
+                default: break;
+            }
+            Logger::Log("POTION", "limiar atingido (hp=%d%% mp=%d%%) mas a potion nao saiu: %s",
+                        hpPercent, mpPercent, why);
+        }
     }
 }
 
@@ -197,6 +506,35 @@ static DWORD WINAPI WatcherThread(LPVOID)
 // ============================================================================
 // Handlers de mensagens tipadas (MessageRegistry)
 // ============================================================================
+
+// Aplica os campos de configuração (mesmo formato do POTION_CONFIG).
+static void ApplyConfigPayload(const char* payload)
+{
+    if (!payload || !*payload) return;
+
+    int ival; uint16_t hval;
+    if (CommandParams::ParseIntParam(payload, "hp", &ival) && ival >= 0 && ival <= 100)
+        g_Config.hpThreshold = ival;
+    if (CommandParams::ParseIntParam(payload, "mp", &ival) && ival >= 0 && ival <= 100)
+        g_Config.mpThreshold = ival;
+    if (CommandParams::ParseIntParam(payload, "interval", &ival) && ival >= 100)
+        g_Config.intervalMs = ival;
+    if (CommandParams::ParseIntParam(payload, "hpslot", &ival) && ival >= 0 && ival < 256)
+        g_Config.hpSlot = ival;
+    if (CommandParams::ParseIntParam(payload, "mpslot", &ival) && ival >= 0 && ival < 256)
+        g_Config.mpSlot = ival;
+    // ID do item (hex) — resolve o slot pela tabela do inventário (F3 10).
+    if (CommandParams::ParseHexParam(payload, "hpitem", &hval))
+        g_Config.hpItemId = (int)hval;
+    if (CommandParams::ParseHexParam(payload, "mpitem", &hval))
+        g_Config.mpItemId = (int)hval;
+
+    Logger::Log("POTION", "config: hp<%d%% mp<%d%% intervalo=%dms hpslot=%d mpslot=%d hpitem=0x%04X mpitem=0x%04X",
+                g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs,
+                g_Config.hpSlot, g_Config.mpSlot,
+                g_Config.hpItemId, g_Config.mpItemId);
+}
+
 static void HandlePotionStart(const char* payload)
 {
     (void)payload;
@@ -217,25 +555,30 @@ REGISTER_MESSAGE(POTION_STOP, HandlePotionStop);
 
 static void HandlePotionConfig(const char* payload)
 {
-    if (!payload || !*payload) return;
-
-    int ival = 0;
-    if (CommandParams::ParseIntParam(payload, "hp", &ival) && ival >= 0 && ival <= 100)
-        g_Config.hpThreshold = ival;
-    if (CommandParams::ParseIntParam(payload, "mp", &ival) && ival >= 0 && ival <= 100)
-        g_Config.mpThreshold = ival;
-    if (CommandParams::ParseIntParam(payload, "interval", &ival) && ival >= 100)
-        g_Config.intervalMs = ival;
-    if (CommandParams::ParseIntParam(payload, "hpslot", &ival) && ival >= 0 && ival < 256)
-        g_Config.hpSlot = ival;
-    if (CommandParams::ParseIntParam(payload, "mpslot", &ival) && ival >= 0 && ival < 256)
-        g_Config.mpSlot = ival;
-
-    Logger::Log("POTION", "config: hp<%d%% mp<%d%% intervalo=%dms hpslot=%d mpslot=%d",
-                g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs,
-                g_Config.hpSlot, g_Config.mpSlot);
+    ApplyConfigPayload(payload);
 }
 REGISTER_MESSAGE(POTION_CONFIG, HandlePotionConfig);
+
+// POTION_APPLY — o botão "Aplicar" da UI: UMA mensagem que aplica a
+// configuração E arma o módulo (idempotente). Evita a dances de
+// STOP -> CONFIG -> START, que deixava o módulo meio-morto na UI.
+static void HandlePotionApply(const char* payload)
+{
+    // Debounce: segurar a tecla do botão dispara o Click várias vezes por
+    // segundo (o repeat de teclado do Windows). A configuração é a mesma,
+    // então o repetido é ignorado.
+    static DWORD lastApply = 0;
+    const DWORD now = GetTickCount();
+    if (lastApply != 0 && now - lastApply < 1000) return;
+    lastApply = now;
+
+    ApplyConfigPayload(payload);
+    InterlockedExchange(&g_Active, 1);
+    Logger::Log("POTION", "auto-potion LIGADO (hp<%d%% mp<%d%% intervalo=%dms)",
+                g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs);
+    LogStatus();
+}
+REGISTER_MESSAGE(POTION_APPLY, HandlePotionApply);
 
 static void HandlePotionStatus(const char* payload)
 {
@@ -305,8 +648,281 @@ void SetConfig(const Settings& cfg)
     g_Config = cfg;
 }
 
-void OnItemUsePacket(const uint8_t* data, int len)
+// ============================================================================
+// Inventário (F3 10) — tabela slot → ID do item
+//
+// Layout (servidor eMU: CItemManager::GCItemListSend / PMSG_ITEM_LIST_SEND):
+//   [C2/C3 <size>] F3 10 <count> [slot(1) + ItemInfo(12)] * count
+//
+// O ID do item é montado a partir do ItemInfo (CItemManager::ItemByteConvert):
+//   byte0            → índice bits 0..7
+//   byte3 bit 1      → índice bit 8
+//   byte5 bits 3..6  → índice bits 9..12 (o "grupo" = índice >> 9)
+//
+// ⚠️ O servidor usa GET_ITEM(grupo,idx) = grupo*512 + idx (MAX_ITEM_TYPE=512),
+// então os bits do grupo ficam em 9..12 — não em 8..11.
+// ============================================================================
+static unsigned DecodeItemId(const uint8_t* info)
 {
+    unsigned id = info[0];
+    id |= (unsigned)((info[3] & 0x02) << 7);      // índice bit 8
+    id |= (unsigned)(((info[5] >> 3) & 0x0F) << 9); // índice bits 9..12
+    return id;
+}
+
+// ============================================================================
+// Observação do servidor: um único ponto de entrada para os pacotes S→C.
+// ============================================================================
+
+// Decodifica (de forma silenciosa) o corpo cifrado de um pacote C3.
+// O servidor usa SimpleModulus nos pacotes C3/C4 (SocketManager::DataSend).
+static bool TryDecodeSmBody(const uint8_t* data, int len, uint8_t* out, int outCap, int* outLen)
+{
+    if (!data || len < 2 + SM_ENCRYPTED_SIZE) return false;
+    if (data[0] != (uint8_t)MuOpcodes::HeaderType::C3) return false;
+
+    const int smLen = len - 2;
+    if (smLen < SM_ENCRYPTED_SIZE) return false;
+
+    // Cada bloco de 11 bytes vira 8 bytes: o Decrypt escreve (smLen/11)*8.
+    // Não pode estourar o buffer de destino.
+    if ((smLen / SM_ENCRYPTED_SIZE) * SM_BLOCK_SIZE > outCap) return false;
+
+    SimpleModulusCipher::SetVerbose(false);
+    int decLen = SimpleModulusCipher::Decrypt(out, data + 2, smLen);
+    if (decLen <= 0) {
+        // O SERVIDOR cifra os C3 com a chave de RECEPÇÃO (Obj2 do cliente) —
+        // com a chave de envio o checksum do SimpleModulus falha.
+        decLen = SimpleModulusCipher::DecryptReceive(out, data + 2, smLen);
+    }
+    SimpleModulusCipher::SetVerbose(true);
+
+    if (decLen <= 0) return false;
+    *outLen = (decLen > outCap) ? outCap : decLen;
+    return true;
+}
+// ============================================================================
+// F3 E0 — character info (vida/mana do JOGADOR).
+// payload: Level(2) LevelUpPoint(2) Exp(4) NextExp(4) Str(2) Agi(2) Vit(2)
+//          Ene(2) Leadership(2) Life(2) MaxLife(2) Mana(2) MaxMana(2) ...
+// (WORDs little-endian)
+// ============================================================================
+static void ParseCharacterInfo(const uint8_t* p, int len)
+{
+    if (len < 30) return;
+
+    auto rd16 = [](const uint8_t* b) -> unsigned {
+        return (unsigned)b[0] | ((unsigned)b[1] << 8);   // little-endian
+    };
+
+    const unsigned level  = rd16(p + 0);
+    const unsigned life   = rd16(p + 22);
+    const unsigned maxLife= rd16(p + 24);
+    const unsigned mana   = rd16(p + 26);
+    const unsigned maxMana= rd16(p + 28);
+
+    if (maxLife > 0) {
+        g_charLife     = life;
+        g_charMaxLife  = maxLife;
+        g_charMana     = mana;
+        g_charMaxMana  = maxMana;
+        g_charStatsValid = true;
+        g_charTick = GetTickCount();
+    }
+
+    Logger::Log("POTION", "character info (F3 E0): level=%u life=%u/%u mana=%u/%u",
+                level, life, maxLife, mana, maxMana);
+}
+
+// ============================================================================
+// F3 E1 — character calc: vida/mana ATUAL + máximo.
+// payload: CurHP(4) MaxHP(4) CurMP(4) MaxMP(4) CurBP(4) MaxBP(4) CurSD(4) ...
+// (DWORDs little-endian)
+//
+// O servidor manda este pacote junto com o update de life (C1 26) — os dois
+// descrevem o MESMO personagem (o jogador local). É daqui que sai o
+// MaxLife (sem ele não dá para calcular o %).
+// ============================================================================
+static void ParseCharacterCalc(const uint8_t* p, int len)
+{
+    if (len < 32) return;
+
+    auto rd32 = [](const uint8_t* b) -> unsigned {
+        return (unsigned)b[0] | ((unsigned)b[1] << 8) |
+               ((unsigned)b[2] << 16) | ((unsigned)b[3] << 24);   // little-endian
+    };
+
+    const unsigned curHP  = rd32(p + 0);
+    const unsigned maxHP  = rd32(p + 4);
+    const unsigned curMP  = rd32(p + 8);
+    const unsigned maxMP  = rd32(p + 12);
+    const unsigned curBP  = rd32(p + 16);
+    const unsigned curSD  = rd32(p + 24);
+
+    if (maxHP == 0) return;
+
+    // Sanidade: os valores têm de ser coerentes entre si (atual <= máximo).
+    // Não se compara com o tráfego: um update de life antigo (ou um pacote
+    // type 0xFE com o máximo) rejeitaria um calc válido.
+    if (curHP > maxHP + 1000 || curMP > maxMP + 1000) return;
+
+    g_charLife     = curHP;
+    g_charMaxLife  = maxHP;
+    g_charMana     = curMP;
+    g_charMaxMana  = maxMP;
+    g_charStatsValid = true;
+    g_charTick = GetTickCount();
+
+    static int logCount = 0;
+    logCount++;
+    if (logCount <= 5 || (logCount % 20) == 0) {
+        Logger::Log("POTION", "character calc (F3 E1): life=%u/%u mana=%u/%u bp=%u sd=%u",
+                    curHP, maxHP, curMP, maxMP, curBP, curSD);
+    }
+}
+
+// F3 10 — lista do inventário: payload = <count> [slot(1) + ItemInfo(12)]*
+static void ParseItemList(const uint8_t* p, int len)
+{
+    if (len < 1) return;
+
+    const int count = p[0];
+    const int ITEM_SIZE = 1 + 12;              // slot + ItemInfo
+    if (count <= 0 || count > INVENTORY_SLOTS) return;
+    if (1 + count * ITEM_SIZE > len) {
+        Logger::Log("POTION", "lista de itens truncada (count=%d len=%d) — ignorada", count, len);
+        return;
+    }
+
+    EnterCriticalSection(&g_Lock);
+    for (int i = 0; i < INVENTORY_SLOTS; i++) g_slotItemId[i] = -1;
+    g_itemListCount = count;
+    LeaveCriticalSection(&g_Lock);
+
+    Logger::Log("POTION", "lista de itens (F3 10): %d item(ns)", count);
+    for (int i = 0; i < count; i++) {
+        const uint8_t* item = p + 1 + i * ITEM_SIZE;
+        const int slot = item[0];
+        const unsigned id = DecodeItemId(item + 1);
+        if (slot >= 0 && slot < INVENTORY_SLOTS) {
+            EnterCriticalSection(&g_Lock);
+            g_slotItemId[slot] = (int)id;
+            LeaveCriticalSection(&g_Lock);
+            Logger::Log("POTION", "  slot=%d item=0x%04X", slot, id);
+        }
+    }
+}
+
+void OnServerPacket(const uint8_t* data, int len)
+{
+    if (!data || len < 4) return;
+
+    const uint8_t* buf = data;
+    int bufLen = len;
+
+    // Pacote C3: o corpo vem cifrado (SimpleModulus) → decodifica.
+    uint8_t decoded[512];
+    int decLen = 0;
+    if (data[0] == (uint8_t)MuOpcodes::HeaderType::C3) {
+        if (TryDecodeSmBody(data, len, decoded, (int)sizeof(decoded), &decLen)) {
+            buf = decoded;
+            bufLen = decLen;
+            static int decLogged = 0;
+            if (decLogged < 40) {
+                decLogged++;
+                PacketDiag::LogHex("C3-SM decodificado", decoded, decLen);
+            }
+        }
+        else {
+            static int failCount = 0;
+            if (failCount < 5) {
+                failCount++;
+                Logger::Log("POTION", "C3 do servidor (len=%d) nao decodificou (SimpleModulus) "
+                                      "— o corpo fica cifrado", len);
+            }
+            bufLen = 0;   // não dá para ler o payload
+        }
+    }
+    else if (data[0] == (uint8_t)MuOpcodes::HeaderType::C1) {
+        // corpo em claro: o payload começa depois do header (2 bytes)
+        buf = data + 2;
+        bufLen = len - 2;
+    }
+
+    // Procura os sub-códigos F3 (E0 = character info, E1 = calc, 10 = inventário).
+    for (int i = 0; i + 3 < bufLen && i < 16; i++) {
+        if (buf[i] != 0xF3) continue;
+        const uint8_t sub = buf[i + 1];
+        if (sub == (uint8_t)MuOpcodes::F3Sub::CharacterInfo)
+            ParseCharacterInfo(buf + i + 2, bufLen - i - 2);
+        else if (sub == (uint8_t)MuOpcodes::F3Sub::CharacterCalc)
+            ParseCharacterCalc(buf + i + 2, bufLen - i - 2);
+        else if (sub == (uint8_t)MuOpcodes::F3Sub::ItemList)
+            ParseItemList(buf + i + 2, bufLen - i - 2);
+    }
+
+    // Life/mana (C1 26 / C1 27) — payload cru (o servidor NÃO usa Camada-2
+    // no sentido S→C).
+    if (data[0] == (uint8_t)MuOpcodes::HeaderType::C1) {
+        if (data[2] == (uint8_t)MuOpcodes::ServerToClient::LifeUpdate)
+            OnLifeUpdatePacket(data, len);
+        else if (data[2] == (uint8_t)MuOpcodes::ServerToClient::ManaUpdate)
+            OnManaUpdatePacket(data, len);
+    }
+}
+
+void OnItemListPacket(const uint8_t* data, int len)
+{
+    if (!data || len < 6) return;
+
+    // Localiza o cabeçalho F3 10 (tolera C1/C2/C3/C4 no início).
+    int hdr = -1;
+    for (int i = 0; i + 5 < len && i < 8; i++) {
+        if (data[i + 3] == 0xF3 && data[i + 4] == 0x10) { hdr = i; break; }
+    }
+    if (hdr < 0) return;
+
+    const int count = data[hdr + 5];
+    const int ITEM_SIZE = 1 + 12;              // slot + ItemInfo
+    if (count <= 0 || count > INVENTORY_SLOTS) return;
+    if (hdr + 6 + count * ITEM_SIZE > len) {
+        Logger::Log("POTION", "lista de itens truncada (count=%d len=%d) — ignorada", count, len);
+        return;
+    }
+
+    EnterCriticalSection(&g_Lock);
+    for (int i = 0; i < INVENTORY_SLOTS; i++) g_slotItemId[i] = -1;
+    g_itemListCount = count;
+    LeaveCriticalSection(&g_Lock);
+
+    Logger::Log("POTION", "lista de itens (F3 10): %d item(ns)", count);
+    for (int i = 0; i < count; i++) {
+        const uint8_t* item = data + hdr + 6 + i * ITEM_SIZE;
+        const int slot = item[0];
+        const unsigned id = DecodeItemId(item + 1);
+        if (slot >= 0 && slot < INVENTORY_SLOTS) {
+            EnterCriticalSection(&g_Lock);
+            g_slotItemId[slot] = (int)id;
+            LeaveCriticalSection(&g_Lock);
+            Logger::Log("POTION", "  slot=%d item=0x%04X", slot, id);
+        }
+    }
+}
+
+int FindSlotByItemId(int itemId)
+{
+    if (itemId < 0) return -1;
+
+    EnterCriticalSection(&g_Lock);
+    int found = -1;
+    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+        if (g_slotItemId[i] == itemId) { found = i; break; }
+    }
+    LeaveCriticalSection(&g_Lock);
+    return found;
+}
+
+void OnItemUsePacket(const uint8_t* data, int len){
     if (!data || len != 6) return;
     if (data[0] != (uint8_t)MuOpcodes::HeaderType::C1) return;
     if (data[2] != (uint8_t)MuOpcodes::ClientToServer::ItemUse) return;
@@ -316,24 +932,32 @@ void OnItemUsePacket(const uint8_t* data, int len)
     memcpy(plain, data, 6);
     MuCipher::UnXorData((char*)plain, 3, 6);
 
+    // Snapshot dos vitais ANTES do uso (para classificar HP vs MP depois).
+    // Usa a fonte do servidor (rede) — a memória do jogo não tem o objeto
+    // do jogador local válido.
+    const Vitals before = ReadVitals();
+
     EnterCriticalSection(&g_Lock);
     memcpy(g_pendingModel, plain, 6);
-    g_pendingLife = GameMemory::Player::Life();
-    g_pendingMana = GameMemory::Player::Mana();
+    g_pendingLife = before.life;
+    g_pendingMana = before.mana;
+    g_pendingPeakLife = before.life;
+    g_pendingPeakMana = before.mana;
     g_pendingTick = GetTickCount();
     g_pendingValid = true;
     LeaveCriticalSection(&g_Lock);
 
-    Logger::Log("POTION", "uso de item observado (cliente): slot=%u target=0x%02X type=0x%02X",
-                plain[3], plain[4], plain[5]);
+    Logger::Log("POTION", "uso de item observado (cliente): slot=%u target=0x%02X type=0x%02X (life=%u mana=%u)",
+                plain[3], plain[4], plain[5], before.life, before.mana);
 }
 
 void LogStatus()
 {
-    uint16_t life    = GameMemory::Player::Life();
-    uint16_t maxLife = GameMemory::Player::MaxLife();
-    uint16_t mana    = GameMemory::Player::Mana();
-    uint16_t maxMana = GameMemory::Player::MaxMana();
+    Vitals v = ReadVitals();
+    unsigned life = v.life, maxLife = v.maxLife;
+    unsigned mana = v.mana, maxMana = v.maxMana;
+    const int hpPct = maxLife ? (int)((life * 100) / maxLife) : -1;
+    const int mpPct = maxMana ? (int)((mana * 100) / maxMana) : -1;
 
     EnterCriticalSection(&g_Lock);
     bool hpValid = g_hpModelValid;
@@ -342,14 +966,128 @@ void LogStatus()
     unsigned mpSlot = mpValid ? g_mpModel[3] : 0;
     LeaveCriticalSection(&g_Lock);
 
-    Logger::Log("POTION", "estado: %s | hp<%d%% mp<%d%% intervalo=%dms | modelo HP=%s (slot %u) | modelo MP=%s (slot %u) | life=%u/%u mana=%u/%u",
+    Logger::Log("POTION", "estado: %s | hp<%d%% mp<%d%% intervalo=%dms | modelo HP=%s (slot %u) | modelo MP=%s (slot %u) | life=%u/%u (%d%%) mana=%u/%u (%d%%)",
                 IsRunning() ? "LIGADO" : "DESLIGADO",
                 g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs,
                 hpValid ? "ok" : "-", hpSlot, mpValid ? "ok" : "-", mpSlot,
-                (unsigned)life, (unsigned)maxLife, (unsigned)mana, (unsigned)maxMana);
+                life, maxLife, hpPct, mana, maxMana, mpPct);
 
     if (g_Config.hpSlot >= 0) Logger::Log("POTION", "  slot manual de HP: %d", g_Config.hpSlot);
     if (g_Config.mpSlot >= 0) Logger::Log("POTION", "  slot manual de MP: %d", g_Config.mpSlot);
+    if (g_Config.hpItemId >= 0) {
+        int s = FindSlotByItemId(g_Config.hpItemId);
+        Logger::Log("POTION", "  item de HP 0x%04X -> slot %d", g_Config.hpItemId, s);
+    }
+    if (g_Config.mpItemId >= 0) {
+        int s = FindSlotByItemId(g_Config.mpItemId);
+        Logger::Log("POTION", "  item de MP 0x%04X -> slot %d", g_Config.mpItemId, s);
+    }
+    Logger::Log("POTION", "  inventário conhecido: %d item(ns)", g_itemListCount);
+    Logger::Log("POTION", "  vitals: life=%u/%u mana=%u/%u (fonte: %s)", life, maxLife, mana, maxMana, v.source);
 }
+
+// ============================================================================
+// Updates de life/mana do servidor (S→C)
+//   C1 26 <type> <lifeHi> <lifeLo> <flag> <shieldHi> <shieldLo>
+//   C1 27 <type> <manaHi> <manaLo> <bpHi> <bpLo>
+// O life/mana são big-endian (SET_NUMBERHB/LB no servidor).
+//
+// ⚠️ O byte <type> é o que decide o SIGNIFICADO do valor:
+//   0xFF → vida/mana ATUAL
+//   0xFE → vida/mana MÁXIMA   (o servidor manda o max do personagem)
+//   0xFD → vida atual (o servidor trunca em BYTE)
+// Tratar o 0xFE como vida atual congela o auto-potion com a vida no máximo.
+//
+// ⚠️ O servidor NÃO aplica a Camada-2 (XorFilter) no sentido S→C: o
+// SocketManager::DataSend só faz SimpleModulus (nos C3/C4) + Layer-1.
+// A Camada-2 é do sentido C→S (o servidor a desfaz em ExtractPacket).
+// Por isso aqui o payload é lido CRU.
+// ============================================================================
+static const uint8_t VITALS_TYPE_CURRENT = 0xFF;
+static const uint8_t VITALS_TYPE_MAXIMUM = 0xFE;
+
+void OnLifeUpdatePacket(const uint8_t* data, int len)
+{
+    if (!data || len < 6) return;
+    if (data[0] != (uint8_t)MuOpcodes::HeaderType::C1) return;
+    if (data[2] != (uint8_t)MuOpcodes::ServerToClient::LifeUpdate) return;
+
+    const uint8_t type = data[3];
+    const unsigned life = ((unsigned)data[4] << 8) | data[5];
+
+    // 0xFE = MÁXIMO do personagem (não a vida atual).
+    if (type == VITALS_TYPE_MAXIMUM) {
+        if (life > g_netMaxLife) g_netMaxLife = life;
+        static int maxLog = 0;
+        if (maxLog < 3) {
+            maxLog++;
+            Logger::Log("POTION", "life update MAXIMO (type=0x%02X maxLife=%u)", type, life);
+        }
+        return;
+    }
+
+    g_netLife = life;
+    g_netLifeValid = true;
+    g_netLifeTick = GetTickCount();
+    PushHint(g_hints.life, g_hints.lifeCount, 8, life);
+
+    // Escudo atual (o mesmo campo que o cliente usa na HUD).
+    if (len >= 9) {
+        const unsigned shield = ((unsigned)data[7] << 8) | data[8];
+        PushHint(g_hints.shield, g_hints.shieldCount, 4, shield);
+    }
+
+    static int logCount = 0;
+    logCount++;
+    if (logCount <= 5 || (logCount % 20) == 0) {
+        Logger::Log("POTION", "life update: type=0x%02X life=%u (bytes %02X %02X)",
+                    type, life, data[4], data[5]);
+    }
+}
+
+void OnManaUpdatePacket(const uint8_t* data, int len)
+{
+    if (!data || len < 6) return;
+    if (data[0] != (uint8_t)MuOpcodes::HeaderType::C1) return;
+    if (data[2] != (uint8_t)MuOpcodes::ServerToClient::ManaUpdate) return;
+
+    const uint8_t type = data[3];
+    const unsigned mana = ((unsigned)data[4] << 8) | data[5];
+
+    // 0xFE = MÁXIMO de mana (não a mana atual).
+    if (type == VITALS_TYPE_MAXIMUM) {
+        if (mana > g_netMaxMana) g_netMaxMana = mana;
+        static int maxLog = 0;
+        if (maxLog < 3) {
+            maxLog++;
+            Logger::Log("POTION", "mana update MAXIMO (type=0x%02X maxMana=%u)", type, mana);
+        }
+        return;
+    }
+
+    g_netMana = mana;
+    g_netManaValid = true;
+    g_netManaTick = GetTickCount();
+    PushHint(g_hints.mana, g_hints.manaCount, 8, mana);
+
+    // BP atual (constante nesse servidor — 160 — ótimo para a assinatura).
+    if (len >= 8) {
+        const unsigned bp = ((unsigned)data[6] << 8) | data[7];
+        PushHint(g_hints.bp, g_hints.bpCount, 4, bp);
+    }
+
+    static int logCount = 0;
+    logCount++;
+    if (logCount <= 5 || (logCount % 20) == 0) {
+        Logger::Log("POTION", "mana update: type=0x%02X mana=%u (bytes %02X %02X)",
+                    type, mana, data[4], data[5]);
+    }
+}
+
+// ============================================================================
+// Character info do servidor (S→C): C1 F3 03 (ou C3 + SimpleModulus).
+//
+// Processado por ParseCharacterInfo (chamado de OnServerPacket).
+// ============================================================================
 
 } // namespace AutoPotion

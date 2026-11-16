@@ -7,7 +7,11 @@
 #include <cstdint>
 
 uint32_t SimpleModulusCipher::m_keys[SM_KEY_COUNT * 4] = {0};
+uint32_t SimpleModulusCipher::m_recvKeys[MAX_RECV_KEYS][SM_KEY_COUNT * 4] = {{0}};
+int SimpleModulusCipher::m_recvKeyCount = 0;
+bool SimpleModulusCipher::m_recvReady = false;
 bool SimpleModulusCipher::m_initialized = false;
+bool SimpleModulusCipher::m_verbose = true;
 static int g_initCount = 0;  // limit verbose logging to first init only
 
 // Game's SimpleModulus object at main.exe+0x8397778 (RVA)
@@ -242,12 +246,18 @@ void SimpleModulusCipher::EncryptBlock(void* dest, const void* source, int size)
         totalBits = AddBits(dest, totalBits, ringBuf, 0x16, 0x02);   // 2 overflow bits at stream offset 0x16=22
     }
     
-    // Checksum: matches C# Encode8To11
+    // Checksum: matches C# Encode8To11 / cliente nativo (PacketManager::EncryptBlock)
+    //
+    // IMPORTANTE: o cliente nativo XORa os 8 bytes do SOURCE no checksum — e o
+    // word 3 da chave SM também é cifrado a partir desses mesmos 8 bytes. Se o
+    // checksum e a cifragem usarem conjuntos DIFERENTES (ex.: checksum com zeros
+    // onde a cifra usou lixo de stack), o pacote sai autoinconsistente: o
+    // servidor falha a validação do checksum e DERRUBA a conexão.
+    // => o chamador DEVE passar SM_BLOCK_SIZE bytes válidos no source.
     BYTE finale[2];
     finale[1] = 0xF8;
     for (int k = 0; k < SM_BLOCK_SIZE; k++) {
-        BYTE pb = (k < size) ? ((BYTE*)source)[k] : 0;
-        finale[1] ^= pb;
+        finale[1] ^= ((const BYTE*)source)[k];
     }
     finale[0] = ((BYTE)size ^ 0x3D) ^ finale[1];
     totalBits = AddBits(dest, totalBits, finale, 0, 16);
@@ -328,6 +338,108 @@ int SimpleModulusCipher::ReadBits(const void* buffer, int startBit, int numBits)
 }
 
 // ============================================================================
+// Chave de RECEPÇÃO (objeto de decifrar do cliente)
+//
+// O cliente tem DOIS objetos SimpleModulus: o Obj1 (0x08797778), usado para
+// ENVIAR, e outro logo em seguida, usado para DECIFRAR o que o servidor manda
+// (é com ele que vem o inventário, F3 10, enviado via setE = C3+SM).
+//
+// O prefixo mágico (0x00D546EC) marca o início de cada objeto. Procuramos o
+// próximo e testamos as duas hipóteses de chave (o Key como DecKey, ou o
+// inverso modular dele) — o checksum do SimpleModulus diz qual é a certa.
+//
+// Sem isso os C3 do servidor NÃO decifram: o checksum falha com a chave de
+// envio.
+// ============================================================================
+bool SimpleModulusCipher::InitializeReceiveKeys()
+{
+    if (m_recvReady) return true;
+
+    uintptr_t base = GameMemory::Globals::MainBase();
+    if (!base) return false;
+
+    const uintptr_t obj1 = base + SM_OBJECT_OFFSET;
+    const DWORD PREFIX = 0x00D546EC;
+
+    m_recvKeyCount = 0;
+
+    for (uintptr_t off = 0x48; off <= 0x800 && m_recvKeyCount < MAX_RECV_KEYS; off += 4) {
+        uintptr_t obj = obj1 + off;
+
+        DWORD prefix = 0;
+        __try { prefix = *(DWORD*)obj; } __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+        if (prefix != PREFIX) continue;
+
+        DWORD modulus[SM_KEY_COUNT], key[SM_KEY_COUNT], key2[SM_KEY_COUNT], xorKey[SM_KEY_COUNT];
+        bool ok = true;
+        __try {
+            memcpy(modulus, (void*)(obj + OFF_MODULUS), sizeof(modulus));
+            memcpy(key,     (void*)(obj + OFF_ENCKEY),  sizeof(key));
+            memcpy(key2,    (void*)(obj + OFF_DECKEY),  sizeof(key2));
+            memcpy(xorKey,  (void*)(obj + OFF_XORKEY),  sizeof(xorKey));
+        } __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+        if (!ok || !modulus[0]) continue;
+
+        // Três hipóteses de onde está a DecKey. O checksum do SimpleModulus
+        // decide qual é a certa (o DecryptReceive tenta cada candidata).
+        for (int variant = 0; variant < 3; variant++) {
+            DWORD dec[SM_KEY_COUNT];
+            if (variant == 0)      memcpy(dec, key, sizeof(dec));
+            else if (variant == 1) { for (int i = 0; i < SM_KEY_COUNT; i++) dec[i] = ModInverse32(key[i], modulus[i]); }
+            else                   memcpy(dec, key2, sizeof(dec));
+
+            if (!dec[0]) continue;      // variante sem chave útil
+
+            uint32_t* dst = m_recvKeys[m_recvKeyCount];
+            for (int i = 0; i < SM_KEY_COUNT; i++) {
+                dst[0 * SM_KEY_COUNT + i] = modulus[i];
+                dst[1 * SM_KEY_COUNT + i] = dec[i];
+                dst[2 * SM_KEY_COUNT + i] = dec[i];
+                dst[3 * SM_KEY_COUNT + i] = xorKey[i];
+            }
+            m_recvKeyCount++;
+
+            Logger::Log("SMOD", "Chave RECEPCAO cand %d (obj Obj1+0x%X, variante %d): Mod=[%08X %08X %08X %08X] Dec=[%08X %08X %08X %08X] Xor=[%08X %08X %08X %08X]",
+                m_recvKeyCount - 1, (unsigned)off, variant,
+                modulus[0], modulus[1], modulus[2], modulus[3],
+                dec[0], dec[1], dec[2], dec[3],
+                xorKey[0], xorKey[1], xorKey[2], xorKey[3]);
+        }
+    }
+
+    m_recvReady = (m_recvKeyCount > 0);
+    if (!m_recvReady)
+        Logger::Log("SMOD", "Chave de RECEPCAO nao encontrada (nenhum obj com prefixo %08X)", PREFIX);
+    else
+        Logger::Log("SMOD", "Chave de RECEPCAO: %d candidata(s)", m_recvKeyCount);
+    return m_recvReady;
+}
+
+int SimpleModulusCipher::DecryptReceive(void* dest, const void* source, int size)
+{
+    if (!m_recvReady && !InitializeReceiveKeys()) return -1;
+    if (!m_recvReady) return -1;
+
+    const int blockCount = size / SM_ENCRYPTED_SIZE;
+
+    for (int c = 0; c < m_recvKeyCount; c++) {
+        BYTE* src = (BYTE*)source;
+        BYTE* dst = (BYTE*)dest;
+        int totalValidBytes = 0;
+        bool fail = false;
+
+        for (int i = 0; i < blockCount; i++, src += SM_ENCRYPTED_SIZE, dst += SM_BLOCK_SIZE) {
+            const int validBytes = DecryptBlockWith(m_recvKeys[c], dst, src);
+            if (validBytes < 0) { fail = true; break; }
+            totalValidBytes = i * SM_BLOCK_SIZE + validBytes;
+        }
+        if (!fail)
+            return totalValidBytes > 0 ? totalValidBytes : blockCount * SM_BLOCK_SIZE;
+    }
+    return -1;
+}
+
+// ============================================================================
 // Decrypt: reverse of Encrypt
 // Input: 11-byte encrypted block → Output: 8-byte plaintext
 // ============================================================================
@@ -346,7 +458,8 @@ int SimpleModulusCipher::Decrypt(void* dest, const void* source, int size) {
     for (int i = 0; i < blockCount; i++, src += SM_ENCRYPTED_SIZE, dst += SM_BLOCK_SIZE) {
         int validBytes = DecryptBlock(dst, src);
         if (validBytes < 0) {
-            Logger::Log("SMOD", "Decrypt: block %d/%d checksum FAILED", i, blockCount);
+            if (m_verbose)
+                Logger::Log("SMOD", "Decrypt: block %d/%d checksum FAILED", i, blockCount);
             return -1;  // checksum failure
         }
         totalValidBytes = i * SM_BLOCK_SIZE + validBytes;  // last block's valid byte count
@@ -356,9 +469,13 @@ int SimpleModulusCipher::Decrypt(void* dest, const void* source, int size) {
 }
 
 int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
-    DWORD* modulus = (DWORD*)&m_keys[0 * SM_KEY_COUNT];
-    DWORD* decKey  = (DWORD*)&m_keys[2 * SM_KEY_COUNT];
-    DWORD* xorKey  = (DWORD*)&m_keys[3 * SM_KEY_COUNT];
+    return DecryptBlockWith(m_keys, dest, source);
+}
+
+int SimpleModulusCipher::DecryptBlockWith(const uint32_t* keys, void* dest, const void* source) {
+    DWORD* modulus = (DWORD*)&keys[0 * SM_KEY_COUNT];
+    DWORD* decKey  = (DWORD*)&keys[2 * SM_KEY_COUNT];
+    DWORD* xorKey  = (DWORD*)&keys[3 * SM_KEY_COUNT];
     
     // Guard: if keys are zero, don't crash
     if (modulus[0] == 0) {
@@ -368,8 +485,8 @@ int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
     
     // Diagnostic logging — verbose for first 10 blocks, summary-only after
     static int dbgCount = 0;
-    bool verbose = (dbgCount < 10);
-    {
+    bool verbose = m_verbose && (dbgCount < 10);
+    if (m_verbose) {
         const uint8_t* src = (const uint8_t*)source;
         Logger::Log("SMOD", "DecryptBlock #%d: src=[%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
             dbgCount,
@@ -380,8 +497,8 @@ int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
                 decKey[0], decKey[1], decKey[2], decKey[3],
                 xorKey[0], xorKey[1], xorKey[2], xorKey[3]);
         }
-        dbgCount++;
     }
+    dbgCount++;
     
     // Step 1: Unpack bits from 11-byte encrypted block into ring buffers
     // Matches C# Decode11To8: ShiftBytes into ringBuf, then BitConverter.ToUInt32
@@ -414,8 +531,10 @@ int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
     AddBits(finale, 0, source, 0x48, 0x10);  // 16 bits for finale
     
     // Log ring DWORD values and finale
-    Logger::Log("SMOD", "  ring=[%08X %08X %08X %08X] finale=[%02X %02X]",
-        ring[0], ring[1], ring[2], ring[3], finale[0], finale[1]);
+    if (m_verbose) {
+        Logger::Log("SMOD", "  ring=[%08X %08X %08X %08X] finale=[%02X %02X]",
+            ring[0], ring[1], ring[2], ring[3], finale[0], finale[1]);
+    }
     
     // Step 3: Reverse XOR chain (matches C# Decode11To8)
     ring[2] ^= xorKey[2] ^ (ring[3] & 0xFFFF);
@@ -465,8 +584,10 @@ int SimpleModulusCipher::DecryptBlock(void* dest, const void* source) {
     
     BYTE m = 0xF8;
     for (int k = 0; k < 8; k++) m ^= plaintext[k];
-    Logger::Log("SMOD", "  checksum calc=0x%02X expected=0x%02X numBytes=%d",
-        m, finale[1], finale[0]);
+    if (m_verbose) {
+        Logger::Log("SMOD", "  checksum calc=0x%02X expected=0x%02X numBytes=%d",
+            m, finale[1], finale[0]);
+    }
     if (m != finale[1]) {
         // Checksum mismatch — decryption failed
         Logger::Log("SMOD", "DecryptBlock: checksum FAILED (calc=0x%02X expected=0x%02X) numBytes=%d",

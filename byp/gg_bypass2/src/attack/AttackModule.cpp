@@ -168,6 +168,19 @@ static bool SendPlainPacket(const uint8_t* packet, int len);
 // DIFERENTE do ataque normal 0x11 (que vai C1 puro): o skill passa por
 // XorData encadeado no payload → SimpleModulus → C3 0D [11] → Layer-1 → wire.
 // (PacketInjector::Inject escolhe o pipeline pelo opcode 0x19.)
+// ============================================================================
+// Throttle do log no caminho quente.
+//
+// Com o auto-ataque ligado, cada skill gerava ~6 linhas (2 aqui + 4 no
+// PacketInjector) e o log passava de 60 MB em poucos minutos — com fflush
+// por linha, a thread do JOGO ficava esperando o lock global do logger e
+// o client travava. Agora o detalhe sai 1 a cada 20 ataques.
+// ============================================================================
+static volatile LONG g_AttackLogCounter = 0;
+static inline bool ShouldLogAttackDetail() {
+    return (InterlockedIncrement(&g_AttackLogCounter) % 20) == 1;
+}
+
 bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     uintptr_t localPlayer = GameMemory::Player::Object();
     uintptr_t targetObj = GameMemory::Object::FindByEntityIndex(entityIndex);
@@ -176,6 +189,8 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
         return false;
     }
 
+    const bool logDetail = ShouldLogAttackDetail();
+
     // Log detalhado: comparar OFF_INDEX vs OFF_ID vs slot index
     uint16_t compositeIdx = *(WORD*)(targetObj + GameObject::OFF_INDEX);  // 0x7E
     uint16_t objId = *(WORD*)(targetObj + GameObject::OFF_ID);            // 0x84
@@ -183,8 +198,10 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     int slotIndex = (arrayBase && targetObj > arrayBase) ?
                     (int)((targetObj - arrayBase) / GameAddresses::OBJECT_SIZE) : -1;
 
-    Logger::Log("ATTACK", "SkillAttack: entityIndex=0x%04X compositeIdx(OFF_INDEX)=0x%04X objId(OFF_ID)=0x%04X slotIndex=%d skill=0x%04X",
-                entityIndex, compositeIdx, objId, slotIndex, skillId);
+    if (logDetail) {
+        Logger::Log("ATTACK", "SkillAttack: entityIndex=0x%04X compositeIdx(OFF_INDEX)=0x%04X objId(OFF_ID)=0x%04X slotIndex=%d skill=0x%04X",
+                    entityIndex, compositeIdx, objId, slotIndex, skillId);
+    }
 
     // Plaintext real: [C1][07][19][skillH][skillL][indexH][indexL]
     // skill primeiro, depois o entity index PURO (sem 0xEFF5 — o XOR é só do 0x11).
@@ -203,7 +220,9 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     for (int i = 0; i < 7; i++)
         h += snprintf(hex + h, sizeof(hex) - h, "%02X ", plain[i]);
 
-    Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> PacketInjector::Inject", hex);
+    if (logDetail) {
+        Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> PacketInjector::Inject", hex);
+    }
 
     // Pipeline do skill (diferente do 0x11):
     //   XorData[3,7) → SM → C3 0D [11] → Layer-1 → wire
@@ -391,11 +410,32 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
     Logger::Log("ATTACK", "Dispatcher iniciado (delay=%dms, range=%.1f, hitcount=%d)",
                 g_SessionDelayMs, g_SessionRange, g_SessionHitCount);
 
+    DWORD lastAttackTick = 0;
+
     while (InterlockedCompareExchange(&g_Running, 1, 1) == 1) {
         // Espera: novo monstro OU timeout do delay
         DWORD waitResult = WaitForSingleObject(g_hNewMonsterEvent, g_SessionDelayMs);
 
         if (InterlockedCompareExchange(&g_Attacking, 0, 0) != 1) continue;
+
+        // =====================================================================
+        // DELAY MÍNIMO — o evento do watcher só DESPERTA o dispatcher; o
+        // intervalo configurado é sempre respeitado.
+        //
+        // Sem isso, o tracker de monstros (que pisca: detectado -> removido ->
+        // detectado no mesmo ciclo de 150ms) sinalizava o evento várias vezes
+        // por segundo e o dispatcher disparava uma thread de ataque por
+        // monstro a cada sinal: milhares de skill packets por minuto. O log
+        // virava dezenas de MB (com fflush por linha) e o CLIENT TRAVAVA
+        // esperando o lock global do logger.
+        // =====================================================================
+        const DWORD now = GetTickCount();
+        if (lastAttackTick != 0) {
+            const DWORD elapsed = now - lastAttackTick;
+            if (elapsed < (DWORD)g_SessionDelayMs) {
+                Sleep((DWORD)g_SessionDelayMs - elapsed);
+            }
+        }
 
         int hitCount = g_SessionHitCount;
         if (hitCount < 1) hitCount = 1;
@@ -414,6 +454,21 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
         LeaveCriticalSection(&g_MapLock);
 
         if (targetCount == 0) continue;
+
+        lastAttackTick = GetTickCount();
+
+        // Resumo a cada 5s (visibilidade sem despejar o log).
+        static DWORD lastSummaryTick = 0;
+        static long roundCount = 0;
+        roundCount++;
+        if (lastSummaryTick == 0) lastSummaryTick = GetTickCount();
+        else if (now - lastSummaryTick >= 5000) {
+            const long rounds = roundCount;
+            lastSummaryTick = now;
+            roundCount = 0;
+            Logger::Log("ATTACK", "Dispatcher: %ld rodadas em 5s (%d alvo(s), delay=%dms)",
+                        rounds, targetCount, g_SessionDelayMs);
+        }
 
         // Fire-and-forget: uma thread por monstro (sem log por ciclo — evita poluir o log)
         for (int t = 0; t < targetCount; t++) {

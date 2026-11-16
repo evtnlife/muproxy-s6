@@ -18,6 +18,14 @@ namespace WinFormsMitm
         private AttackService? _attackService;
         private PotionService? _potionService;
 
+// Sincroniza o checkbox do auto-potion sem disparar o handler (evita loop
+// checkbox -> serviço -> checkbox).
+private bool _potionUiSync;
+
+// Debounce do botão "Aplicar" (o repeat de teclado dispara o Click várias
+// vezes por segundo).
+private long _lastPotionApplyTicks;
+
         private TcpLoopbackProxy? _proxy;
 
         HashSet<string> bypassed = new HashSet<string>();
@@ -91,8 +99,15 @@ namespace WinFormsMitm
             _potionService = new PotionService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
             _potionService.OnStateChanged += enabled =>
             {
-                if (InvokeRequired) { BeginInvoke(() => chkAutoPotion.Checked = enabled); return; }
-                chkAutoPotion.Checked = enabled;
+                // Sincroniza o checkbox sem disparar o handler de novo (loop).
+                void Sync()
+                {
+                    _potionUiSync = true;
+                    chkAutoPotion.Checked = enabled;
+                    _potionUiSync = false;
+                }
+                if (InvokeRequired) { BeginInvoke((Action)Sync); return; }
+                Sync();
             };
 
             _hookListener = new HookListenerService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
@@ -258,46 +273,99 @@ namespace WinFormsMitm
 
         private void SetupPotionControls()
         {
+        if (_potionService == null) return;
+
+        chkAutoPotion.CheckedChanged += (s, e) =>
+        {
+            if (_potionService == null || _potionUiSync) return;
+            if (chkAutoPotion.Checked)
+                _potionService.Start();
+            else
+                _potionService.Stop();
+        };
+
+        // Os campos só atualizam o serviço — NENHUMA mensagem sai daqui.
+        // (Antes cada tecla digitada disparava um POTION_CONFIG.)
+        txtPotionHp.TextChanged += (s, e) =>
+        {
+            if (int.TryParse(txtPotionHp.Text, out int hp) && hp >= 0 && hp <= 100 && _potionService != null)
+                _potionService.HpThreshold = hp;
+        };
+
+        txtPotionMp.TextChanged += (s, e) =>
+        {
+            if (int.TryParse(txtPotionMp.Text, out int mp) && mp >= 0 && mp <= 100 && _potionService != null)
+                _potionService.MpThreshold = mp;
+        };
+
+        txtPotionInterval.TextChanged += (s, e) =>
+        {
+            if (int.TryParse(txtPotionInterval.Text, out int ms) && ms >= 100 && _potionService != null)
+                _potionService.IntervalMs = ms;
+        };
+
+        // ID do item da potion (hex) — o byp resolve o slot pela lista de
+        // inventário que o servidor manda (F3 10). Vazio = usa o modelo
+        // aprendido pelo próprio jogo.
+        txtPotionHpItem.TextChanged += (s, e) =>
+        {
             if (_potionService == null) return;
+            _potionService.HpItemId = ParseItemId(txtPotionHpItem.Text);
+        };
 
-            chkAutoPotion.CheckedChanged += (s, e) =>
-            {
-                if (_potionService == null) return;
-                if (chkAutoPotion.Checked)
-                    _potionService.Start();
-                else
-                    _potionService.Stop();
-            };
+        txtPotionMpItem.TextChanged += (s, e) =>
+        {
+            if (_potionService == null) return;
+            _potionService.MpItemId = ParseItemId(txtPotionMpItem.Text);
+        };
 
-            txtPotionHp.TextChanged += (s, e) =>
-            {
-                if (int.TryParse(txtPotionHp.Text, out int hp) && hp >= 0 && hp <= 100 && _potionService != null)
-                {
-                    _potionService.HpThreshold = hp;
-                    _potionService.SendConfig();
-                }
-            };
+        // Slot do inventário (número da célula no jogo). Vazio = usa o
+        // modelo aprendido pelo próprio jogo (beber a potion uma vez).
+        txtPotionHpSlot.TextChanged += (s, e) =>
+        {
+            if (_potionService == null) return;
+            _potionService.HpSlot = ParseSlot(txtPotionHpSlot.Text);
+        };
 
-            txtPotionMp.TextChanged += (s, e) =>
-            {
-                if (int.TryParse(txtPotionMp.Text, out int mp) && mp >= 0 && mp <= 100 && _potionService != null)
-                {
-                    _potionService.MpThreshold = mp;
-                    _potionService.SendConfig();
-                }
-            };
+        txtPotionMpSlot.TextChanged += (s, e) =>
+        {
+            if (_potionService == null) return;
+            _potionService.MpSlot = ParseSlot(txtPotionMpSlot.Text);
+        };
 
-            txtPotionInterval.TextChanged += (s, e) =>
-            {
-                if (int.TryParse(txtPotionInterval.Text, out int ms) && ms >= 100 && _potionService != null)
-                {
-                    _potionService.IntervalMs = ms;
-                    _potionService.SendConfig();
-                }
-            };
+        // "Aplicar": UMA mensagem (POTION_APPLY) — aplica a configuração e arma
+        // o módulo de uma vez. É também o jeito de religar o auto-potion.
+        // Debounce: segurar a tecla do botão (repeat do Windows) dispara o Click
+        // várias vezes por segundo.
+        btnPotionApply.Click += (s, e) =>
+        {
+            if (_potionService == null) return;
+            long nowTicks = DateTime.UtcNow.Ticks;
+            if (nowTicks - _lastPotionApplyTicks < 5_000_000L) return;   // 500 ms
+            _lastPotionApplyTicks = nowTicks;
+            _potionService.Apply();
+        };
+        btnPotionStatus.Click += (s, e) => _potionService?.RequestStatus();
+        }
 
-            btnPotionApply.Click += (s, e) => _potionService?.SendConfig();
-            btnPotionStatus.Click += (s, e) => _potionService?.RequestStatus();
+        /// <summary>Converte "0x1F" / "1F" / "31" no ID do item (-1 = vazio).</summary>
+        private static int ParseItemId(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return -1;
+            string t = text.Trim();
+            if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) t = t.Substring(2);
+            if (!int.TryParse(t, System.Globalization.NumberStyles.HexNumber, null, out int id)) return -1;
+            if (id < 0 || id > 0xFFFF) return -1;
+            return id;
+        }
+
+        /// <summary>Slot do inventário (-1 = vazio = usa o modelo aprendido).</summary>
+        private static int ParseSlot(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return -1;
+            if (!int.TryParse(text.Trim(), out int slot)) return -1;
+            if (slot < 0 || slot > 255) return -1;
+            return slot;
         }
 
         // ============ UI: Skills ============

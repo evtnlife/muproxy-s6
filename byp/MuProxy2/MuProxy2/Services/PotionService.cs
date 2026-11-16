@@ -18,6 +18,8 @@ namespace WinFormsMitm.Services
         public int IntervalMs { get; set; } = 1000;  // intervalo mínimo entre usos (anti-hack)
         public int HpSlot { get; set; } = -1;        // slot do inventário (-1 = modelo aprendido)
         public int MpSlot { get; set; } = -1;
+        public int HpItemId { get; set; } = -1;      // ID do item (hex) — o byp resolve o slot
+        public int MpItemId { get; set; } = -1;      // pela lista de inventário (F3 10)
 
         private bool _enabled;
         public bool Enabled
@@ -42,9 +44,9 @@ namespace WinFormsMitm.Services
 
         public void Start()
         {
-            // Manda a config antes de ligar (o byp usa os limiares na hora).
-            SendConfig();
-
+            // Só liga/desliga. A configuração é enviada pelo botão "Aplicar"
+            // (POTION_APPLY) — mandar a config junto fazia o módulo ficar
+            // meio-morto (STOP -> CONFIG -> START) a cada clique.
             var msg = new PotionStartMessage();
             string wire = msg.ToWire();
 
@@ -70,6 +72,37 @@ namespace WinFormsMitm.Services
             _log?.Invoke("[POTION] STOP");
         }
 
+        /// <summary>
+        /// Botão "Aplicar": manda UMA mensagem que aplica a configuração e
+        /// arma o módulo (idempotente). Também serve para "religar" o
+        /// auto-potion sem precisar mexer no checkbox.
+        /// </summary>
+        public void Apply()
+        {
+            var msg = new PotionApplyMessage
+            {
+                HpThreshold = HpThreshold,
+                MpThreshold = MpThreshold,
+                IntervalMs = IntervalMs,
+                HpSlot = HpSlot,
+                MpSlot = MpSlot,
+                HpItemId = HpItemId,
+                MpItemId = MpItemId
+            };
+            string wire = msg.ToWire();
+            int sent = _dll.SendCommand(wire);
+            if (sent > 0)
+            {
+                _enabled = true;
+                OnStateChanged?.Invoke(true);
+                _log?.Invoke($"[POTION] APPLY -> {wire}");
+            }
+            else
+            {
+                _log?.Invoke("[POTION] ERRO: byp.dll não conectada");
+            }
+        }
+
         public void SendConfig()
         {
             var msg = new PotionConfigMessage
@@ -78,7 +111,9 @@ namespace WinFormsMitm.Services
                 MpThreshold = MpThreshold,
                 IntervalMs = IntervalMs,
                 HpSlot = HpSlot,
-                MpSlot = MpSlot
+                MpSlot = MpSlot,
+                HpItemId = HpItemId,
+                MpItemId = MpItemId
             };
             string wire = msg.ToWire();
             _dll.SendCommand(wire);

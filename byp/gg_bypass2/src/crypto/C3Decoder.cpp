@@ -10,6 +10,13 @@
 
 namespace C3Decoder {
 
+static InnerPacketObserver g_InnerObserver = nullptr;
+
+void SetInnerPacketObserver(InnerPacketObserver obs)
+{
+    g_InnerObserver = obs;
+}
+
 void LogDecoded(const char* displayBuf, int displayLen)
 {
     if (!displayBuf || displayLen <= 2) return;
@@ -92,6 +99,11 @@ void LogDecoded(const char* displayBuf, int displayLen)
         dp += snprintf(decHex + dp, sizeof(decHex) - dp, "%02X ", innerPkt[j]);
     Logger::Log("PACKETSNIFFER", "SEND %s decoded: [%s] dk=%02X",
         (innerHdr == 0xC2) ? "C4>C2" : "C3>C1", decHex, decrypted[0]);
+
+    // Entrega o pacote interno aos interessados (ex.: o auto-potion, que
+    // reconhece o uso de item 0x26 aqui — o C3+SM do cliente).
+    if (g_InnerObserver)
+        g_InnerObserver(innerPkt, innerTotalSize);
 }
 
 } // namespace C3Decoder

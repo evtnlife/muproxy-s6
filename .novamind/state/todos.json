@@ -1,42 +1,34 @@
 [
   {
-    "content": "OpenSpec change add-auto-potion (proposal/design/tasks) + spec",
+    "content": "Diagnóstico: vitais travados no MaxLife (type 0xFE do C1 26/27 tratado como vida atual)",
     "status": "completed"
   },
   {
-    "content": "MuCipher: add UnXorData (inverse da Camada-2)",
+    "content": "AutoPotion: byte 'type' + fontes com timestamp + log do motivo de não disparar",
     "status": "completed"
   },
   {
-    "content": "PacketInjector: pipeline por opcode + MuOpcodes enum (0x26 uso de item)",
+    "content": "Diagnóstico novo: servidor BlackRock NÃO manda life/mana MÁXIMO em nenhum pacote (dump cru confirmou)",
     "status": "completed"
   },
   {
-    "content": "Módulo AutoPotion (header+cpp): watcher, thresholds, aprendizado de slot, comandos",
+    "content": "ClientVitals: localizar e ler ViewCurHP/ViewMaxHP/ViewCurMP/ViewMaxMP no main.exe (assinatura life/mana/BP/escudo)",
     "status": "completed"
   },
   {
-    "content": "PacketSniffer: notificar AutoPotion sobre pacotes C1 26 de saída",
+    "content": "AutoPotion: usar os vitais do cliente como fonte primária (traz o MÁXIMO)",
     "status": "completed"
   },
   {
-    "content": "dllmain + build.bat: registrar o novo módulo",
+    "content": "UI: debounce do botão Aplicar (repeat de teclado gerava 6-8 mensagens)",
     "status": "completed"
   },
   {
-    "content": "Build e verificação (byp.dll)",
+    "content": "Build + deploy (byp.dll + MuProxy2) — OK",
     "status": "completed"
   },
   {
-    "content": "MuProxy2: mensagem, PotionService, UI do auto potion",
-    "status": "completed"
-  },
-  {
-    "content": "Documentar na skill (§13) e memória do projeto",
-    "status": "completed"
-  },
-  {
-    "content": "Commit final + revisão do diff",
-    "status": "in_progress"
+    "content": "Teste: reiniciar o jogo, confirmar 'ClientVitals: ... maxLife=214 maxMana=219' e a potion disparando",
+    "status": "pending"
   }
 ]

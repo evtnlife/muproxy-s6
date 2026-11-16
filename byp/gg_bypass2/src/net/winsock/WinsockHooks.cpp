@@ -107,8 +107,12 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
         // ---- Decifra Layer-1 (XOR 0x36, sub 0x07) para mostrar plaintext no log ----
         // O jogo envia bytes cifrados (headers FC/FE), mas queremos ver C1/C2/C3/C4.
         // Aplica MuCipher::FullDecrypt (apenas Layer-1, sem XorFilter) em uma copia.
-        int port = 0;
-        bool isGS = GameServerConnection::GetSocketPort(s, &port) && GameServerConnection::IsGameServerPort(port);
+        //
+        // A porta NÃO identifica o socket do GS (o connect redireciona o jogo
+        // para 127.0.0.1 e a porta real pode estar fora do range) — quem
+        // identifica é o CONTEÚDO: um pacote MU decifrado tem header válido.
+        bool isGS = GameServerConnection::IsGameServerSocket(s) ||
+                    GameServerConnection::MarkIfGameServerSocket(s, (const uint8_t*)buf, len);
         char decBuf[4096];
         const char* displayBuf = buf;
         int displayLen = len;

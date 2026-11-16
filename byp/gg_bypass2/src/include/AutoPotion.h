@@ -44,6 +44,8 @@ struct Settings {
     int intervalMs  = 1000;  // intervalo mínimo entre usos (anti-hack do servidor)
     int hpSlot      = -1;    // slot do inventário da potion de HP (-1 = usa o modelo aprendido)
     int mpSlot      = -1;    // slot do inventário da potion de MP (-1 = usa o modelo aprendido)
+    int hpItemId    = -1;    // ID do item da potion de HP (-1 = não usado)
+    int mpItemId    = -1;    // ID do item da potion de MP (-1 = não usado)
 };
 
 // ---- Ciclo de vida ----
@@ -63,6 +65,31 @@ void SetConfig(const Settings& cfg);
 // Chamado pelo PacketSniffer quando o JOGADOR usa um item (C1 06 26, ainda
 // na forma Camada-2 — a decodificação é feita aqui dentro).
 void OnItemUsePacket(const uint8_t* data, int len);
+
+// Chamado pelo PacketSniffer quando o servidor manda a lista de itens do
+// inventário (F3 10 = PMSG_ITEM_LIST_SEND):
+//   C2 <sizeHi> <sizeLo> F3 10 <count> [slot(1) + ItemInfo(12)] * count
+// Monta a tabela slot → ID do item (para configurar a potion por ID).
+void OnItemListPacket(const uint8_t* data, int len);
+
+// Chamado pelo PacketSniffer para TODO pacote S→C do game server.
+// Detecta e trata (em ordem):
+//   F3 03 → character info (life/maxLife/mana/maxMana)
+//   F3 10 → lista do inventário (slot → ID do item)
+//   C1 26 → update de life      C1 27 → update de mana
+// Pacotes C3 têm o corpo cifrado (SimpleModulus) — são decodificados aqui.
+void OnServerPacket(const uint8_t* data, int len);
+
+// Procura no inventário o slot que contém o item com o ID informado.
+// Retorna -1 se não achar (ou se a lista ainda não chegou).
+int FindSlotByItemId(int itemId);
+
+// Updates de life/mana do servidor (S→C) — a fonte mais confiável do valor
+// ATUAL (o cliente nem sempre tem o ObjectCharacter válido em memória).
+//   C1 26 <type> <lifeHi> <lifeLo> <flag> <shieldHi> <shieldLo>
+//   C1 27 <type> <manaHi> <manaLo> <bpHi> <bpLo>
+void OnLifeUpdatePacket(const uint8_t* data, int len);
+void OnManaUpdatePacket(const uint8_t* data, int len);
 
 // ---- Diagnóstico ----
 void LogStatus();

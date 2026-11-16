@@ -128,11 +128,47 @@ void FullDecrypt(char* data, int len, BYTE xorKey, BYTE subKey)
 }
 
 // ============================================================================
-// Cifracao: APENAS Camada 1 (XOR+sub)
+// Cifragem completa: APENAS Camada 1 (XOR+sub)
 // ============================================================================
 void FullEncrypt(char* data, int len, BYTE xorKey, BYTE subKey)
 {
     EncryptLayer1(data, len, xorKey, subKey);
+}
+
+// ============================================================================
+// Detecção por DADOS: o buffer criptografado começa com um pacote MU válido?
+// ============================================================================
+int PeekDecodedPacketSize(const BYTE* enc, int len)
+{
+    if (!enc || len < 3) return 0;
+
+    unsigned char xorKey = 0, subKey = 0;
+    GetGameServerKeys(&xorKey, &subKey);
+
+    // Decifra só o começo (basta o header + o size).
+    unsigned char d[4] = { 0 };
+    const int n = (len < 4) ? len : 4;
+    for (int i = 0; i < n; i++)
+        d[i] = (unsigned char)((enc[i] ^ xorKey) - subKey);
+
+    const int hdr = GetMuHeaderSize(d[0]);
+    if (hdr <= 0) return 0;
+
+    int size = 0;
+    if (hdr == 2) {
+        if (n < 2) return 0;
+        size = d[1];
+    } else {
+        if (n < 3) return 0;
+        size = (d[1] << 8) | d[2];
+    }
+
+    // Size mínimo = header + opcode; máximo = o limite de um pacote MU.
+    // (O size pode ser MAIOR que o que já chegou: o pacote pode estar
+    //  partido entre duas leituras do socket — ainda assim é um pacote MU.)
+    if (size < hdr + 1) return 0;
+    if (size > 4096) return 0;
+    return size;
 }
 
 } // namespace MuCipher

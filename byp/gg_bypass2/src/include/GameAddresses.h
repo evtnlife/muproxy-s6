@@ -22,6 +22,7 @@ struct GameAddresses {
     static constexpr uintptr_t LOCAL_PLAYER_PTR  = 0x7BC4F04; // DWORD* -> local player GameObject
     static constexpr uintptr_t CHARACTER_PTR     = 0xA96B0C;  // struct direta: nome, classe, skills (NÃO tem level!)
     static constexpr uintptr_t USER_OBJECT_PTR    = 0x8128AC8; // DWORD* -> user object struct (nome, level, stats)
+  static constexpr uintptr_t PARTY_LIST_PTR     = 0x81CB4E8; // DWORD* -> party list (32 bytes/membro; slot 0 = jogador local)
     static constexpr uintptr_t MAP_NUMBER        = 0xA61E18; // DWORD (current map id)
     static constexpr uintptr_t VIEWPORT_WIDTH    = 0xA61E58; // DWORD (pixels)
     static constexpr uintptr_t VIEWPORT_HEIGHT   = 0xA61E5C; // DWORD (pixels)

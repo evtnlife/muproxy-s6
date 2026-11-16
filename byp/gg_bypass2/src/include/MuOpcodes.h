@@ -73,6 +73,38 @@ enum class ServerToClient : u8 {
     SkillList     = 0xF3,  // F3 <sub> — lista de skills (sub 0x11 / 0xE2)
 };
 
+// ============================================================================
+// Sub-códigos do pacote F3 (servidor → cliente)
+// O F3 é um "envelope": o byte seguinte diz o que é.
+//
+// Formatos REAIS do BlackRock (capturados em 16/11/2026 no gg_bypass2_s2c.log):
+//   F3 00 → lista de personagens (login)
+//   F3 11 → lista de skills  [count][ListType][index(1) skill(2 LE) level(1)]*
+//   F3 13 → equipamento
+//   F3 15 → nome do personagem
+//   F3 E0 → character info  [Level, LevelUpPoint, Exp(4), NextExp(4), Str, Agi,
+//                             Vit, Ene, Leadership, Life, MaxLife, Mana, MaxMana…]
+//            (os WORD são little-endian)
+//   F3 E1 → character calc  [CurHP, MaxHP, CurMP, MaxMP, CurBP, MaxBP,
+//                             CurSD, MaxSD…] — DWORDs little-endian
+//   F3 E2 → health bar dos alvos (count + entradas)
+//   F3 E3 → battle info     F3 E5 → ?      F3 EF → nome do guild/master
+// ============================================================================
+namespace F3Sub {
+    using u8 = uint8_t;
+    enum : u8 {
+        CharacterList = 0x00,
+        ItemList      = 0x10,
+        SkillList     = 0x11,
+        Equipment     = 0x13,
+        Name          = 0x15,
+        CharacterInfo = 0xE0,   // life/maxLife/mana/maxMana do jogador
+        CharacterCalc = 0xE1,   // life/mana ATUAL + máximo (DWORD LE)
+        HealthBar     = 0xE2,
+        BattleInfo    = 0xE3,
+    };
+} // namespace F3Sub
+
 // ---- Tipos de ataque (campo "type" da sessão do módulo de ataque) ----
 enum class AttackType : u8 {
     Normal = 0x00,

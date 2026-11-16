@@ -9,6 +9,10 @@
     "PS (PS.dll) no longer exists in the project — related docs can be deleted",
     "Each skill topic gets its own enriched .md file in references/; SKILL.md only has a brief description + pointer to that file (progressive disclosure pattern)",
     "não podemos esquecer da estrutura de pasta ok, não quero cpp solto sem pasta assim ta mt bagunçado isso",
-    "não seria melhor subdividir cada namespace no gamememory? cada um com seu arquivo"
+    "não seria melhor subdividir cada namespace no gamememory? cada um com seu arquivo",
+    "Resposta obrigatória em português",
+    "Não deixar .cpp solto na raiz de src; cada namespace em arquivo próprio, com headers em src/include",
+    "Criar um enum para os opcodes, organizado por direção, para não ficar perdido no ar o que é cada opcode",
+    "nao faca comit"
   ]
 }

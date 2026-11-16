@@ -3,6 +3,7 @@
 // Extraído do WinsockHooks (Fase 6/9 do refactor reorganize-byp-modules).
 #include "GameServerConnection.h"
 #include "OriginalApi.h"
+#include "MuCipher.h"
 #include "Logger.h"
 
 namespace GameServerConnection {
@@ -10,6 +11,15 @@ namespace GameServerConnection {
 // Socket do game server do JOGO (conectado ao MuProxy2 → relay → GS real).
 // Usamos este socket para injeção porque é a MESMA conexão TCP autenticada.
 static SOCKET g_GameServerSocket = INVALID_SOCKET;
+
+// Socket onde o jogo está JOGANDO (tráfego de objetos/life). A injeção tem
+// que sair por aqui: o servidor processa o pacote na sessão da conexão.
+static SOCKET g_GameplaySocket = INVALID_SOCKET;
+
+// Sockets confirmados como GS pela ANÁLISE DO TRÁFEGO (detecção por dados).
+static const int MAX_GS_SOCKETS = 16;
+static SOCKET g_GsSockets[MAX_GS_SOCKETS];
+static int    g_GsSocketCount = 0;
 
 // Porta do game server detectada automaticamente via pacote C116
 // (0xC1 0x16 = "ConnectToServer": login server informa IP+porta do GS).
@@ -24,6 +34,56 @@ void SetSocket(SOCKET s)
 SOCKET GetSocket()
 {
     return g_GameServerSocket;
+}
+
+void SetGameplaySocket(SOCKET s)
+{
+    if (s == INVALID_SOCKET) return;
+    if (g_GameplaySocket != s) {
+        Logger::Log("PACKETSNIFFER", "socket de gameplay = %d (antes: %d)", (int)s, (int)g_GameplaySocket);
+    }
+    g_GameplaySocket = s;
+    g_GameServerSocket = s;   // a injeção segue o gameplay
+    MarkGameServerSocket(s);
+}
+
+SOCKET GetGameplaySocket()
+{
+    return g_GameplaySocket;
+}
+
+void MarkGameServerSocket(SOCKET s)
+{
+    if (s == INVALID_SOCKET) return;
+    for (int i = 0; i < g_GsSocketCount; i++)
+        if (g_GsSockets[i] == s) return;
+    if (g_GsSocketCount < MAX_GS_SOCKETS)
+        g_GsSockets[g_GsSocketCount++] = s;
+}
+
+// ============================================================================
+// Detecção por DADOS: o socket é do GS se o tráfego decifrado (Camada-1)
+// começa com um pacote MU válido (header C1/C2/C3/C4 + size coerente).
+//
+// Isso substitui a heurística por PORTA: o hook de connect redireciona o
+// jogo para 127.0.0.1 (MuProxy2) e a porta real do GS (44411 no BlackRock)
+// não está no range hardcoded — o tráfego nunca era decifrado e nenhum
+// pacote S→C era reconstruído.
+// ============================================================================
+bool MarkIfGameServerSocket(SOCKET s, const uint8_t* data, int len)
+{
+    if (s == INVALID_SOCKET || !data || len <= 0) return false;
+
+    for (int i = 0; i < g_GsSocketCount; i++)
+        if (g_GsSockets[i] == s) return true;
+
+    const int pktSize = MuCipher::PeekDecodedPacketSize(data, len);
+    if (pktSize <= 0) return false;
+
+    MarkGameServerSocket(s);
+    Logger::Log("PACKETSNIFFER", "socket %d detectado como GS pelo trafego (pacote MU de %d bytes)",
+                (int)s, pktSize);
+    return true;
 }
 
 // Portas do game server (apenas trafego nelas sera decifrado)
@@ -79,6 +139,15 @@ bool GetSocketPort(SOCKET s, int* outPort) {
 
 bool IsGameServerSocket(SOCKET s)
 {
+    if (s == INVALID_SOCKET) return false;
+
+    // Sockets confirmados pela análise do tráfego (detecção por dados).
+    for (int i = 0; i < g_GsSocketCount; i++)
+        if (g_GsSockets[i] == s) return true;
+
+    // Socket rastreado no connect / no gameplay.
+    if (s == g_GameServerSocket) return true;
+
     int port = 0;
     return GetSocketPort(s, &port) && IsGameServerPort(port);
 }
@@ -91,7 +160,12 @@ bool IsGameServerSocket(SOCKET s)
 bool SendToGameServer(const uint8_t* data, int len)
 {
     if (!data || len <= 0) return false;
-    if (g_GameServerSocket == INVALID_SOCKET) {
+
+    // Alvo: a conexão onde o jogo está JOGANDO (o servidor processa o pacote
+    // na sessão dessa conexão). Cai no socket rastreado se ainda não houver.
+    SOCKET target = (g_GameplaySocket != INVALID_SOCKET) ? g_GameplaySocket : g_GameServerSocket;
+
+    if (target == INVALID_SOCKET) {
         Logger::Log("PACKETSNIFFER", "InjectToServer: GS socket nao rastreado");
         return false;
     }
@@ -99,20 +173,22 @@ bool SendToGameServer(const uint8_t* data, int len)
     // Verifica se o socket ainda esta vivo (nao foi fechado pelo jogo)
     int optval = 0;
     int optlen = sizeof(optval);
-    if (getsockopt(g_GameServerSocket, SOL_SOCKET, SO_ERROR, (char*)&optval, &optlen) == SOCKET_ERROR || optval != 0) {
+    if (getsockopt(target, SOL_SOCKET, SO_ERROR, (char*)&optval, &optlen) == SOCKET_ERROR || optval != 0) {
         Logger::Log("PACKETSNIFFER", "InjectToServer: socket invalido (err=%d), limpando", optval);
-        g_GameServerSocket = INVALID_SOCKET;
+        if (target == g_GameServerSocket) g_GameServerSocket = INVALID_SOCKET;
+        if (target == g_GameplaySocket) g_GameplaySocket = INVALID_SOCKET;
         return false;
     }
 
     // Usa o send ORIGINAL (fora do hook) para não reaparecer no log de pacotes.
     OriginalApi::SendFn origSend = OriginalApi::GetSend();
-    int sent = origSend ? origSend(g_GameServerSocket, (const char*)data, len, 0)
-                         : send(g_GameServerSocket, (const char*)data, len, 0);
+    int sent = origSend ? origSend(target, (const char*)data, len, 0)
+                         : send(target, (const char*)data, len, 0);
     if (sent == SOCKET_ERROR) {
         int err = WSAGetLastError();
         Logger::Log("PACKETSNIFFER", "InjectToServer: send error %d - socket morto, limpando", err);
-        g_GameServerSocket = INVALID_SOCKET;
+        if (target == g_GameServerSocket) g_GameServerSocket = INVALID_SOCKET;
+        if (target == g_GameplaySocket) g_GameplaySocket = INVALID_SOCKET;
         return false;
     }
 

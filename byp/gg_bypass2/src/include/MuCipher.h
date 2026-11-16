@@ -45,4 +45,15 @@ bool GetGameServerKeys(unsigned char* xorKey, unsigned char* subKey);
 // Tamanho do header MU pelo byte de tipo (C1/C3=2, C2/C4=3, outro=0)
 int GetMuHeaderSize(BYTE firstByte);
 
+// ============================================================================
+// Detecção por DADOS: o buffer criptografado (Camada-1) começa com um pacote
+// MU válido? Devolve o tamanho total do pacote (header + payload) ou 0.
+//
+// Usado para descobrir QUAL socket é o do game server: o hook de connect
+// redireciona o jogo para 127.0.0.1 (MuProxy2), então getpeername() devolve a
+// porta do proxy e a heurística por porta não funciona. O que não falha é o
+// conteúdo: um pacote MU decifrado tem header C1/C2/C3/C4 e um size coerente.
+// ============================================================================
+int PeekDecodedPacketSize(const BYTE* enc, int len);
+
 } // namespace MuCipher
