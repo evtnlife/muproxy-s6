@@ -56,14 +56,27 @@
 
 ## 4. Fase 3 — Extrair `NameRewriter` e `PacketReassembler`
 
-- [ ] 4.1 Criar `src/NameRewriter.h/.cpp` com `EncodeName`, `IsCreateCharPacket`,
-  `g_NameKey`, `g_RewriteName`, `g_RewriteClass`; verificar que o build passa e o
-  name-rewrite (HexDL) continua aplicado no pacote de create-char.
-- [ ] 4.2 Criar `src/PacketReassembler.h/.cpp` com os buffers por socket,
-  `ReadMuHeaderSize`/`ReadMuPacketLength`, `FlushReasmBuffer`; verificar que o build passa
-  e o log de pacotes continua montando pacotes completos.
-- [ ] 4.3 Adicionar os dois .cpp à `SOURCES` do `build.bat` e verificar o build.
-- [ ] 4.4 Commit da Fase 3 e teste em campo: log de pacotes e name-rewrite íntegros.
+- [x] 4.1 Criar `src/include/NameRewriter.h` + `src/packets/NameRewriter.cpp` com
+  `EncodeName`, `IsCreateCharPacket`, `g_NameKey`, `g_RewriteName`, `g_RewriteClass`;
+  verificar que o build passa e o name-rewrite (HexDL) continua aplicado no pacote de
+  create-char.
+  - ATENÇÃO: o rewrite (HexDL) **não** está ligado a nenhum hook hoje (o código é
+    material de RE, sem call-site). A extração preserva esse estado — nenhuma
+    functionality nova foi ativada.
+- [x] 4.2 Criar `src/include/PacketReassembler.h` + `src/packets/PacketReassembler.cpp`
+  com os buffers por socket, `ReadMuPacketLength`, `Flush` (callback por pacote) e
+  `Remove`; verificar que o build passa e o log de pacotes continua montando pacotes
+  completos.
+- [x] 4.3 Adicionar os dois .cpp à `SOURCES` do `build.bat` e verificar o build.
+- [x] 4.4 Commit da Fase 3 e teste em campo: log de pacotes e name-rewrite íntegros.
+  - commit `49f42fb` (build OK). Teste em campo do log de pacotes: pendente do usuário.
+
+## 4b. Reorganização de pastas (pedido do usuário)
+
+- [x] Nenhum `.cpp` solto na raiz de `src/` — um módulo por pasta:
+  `core/`, `crypto/`, `net/`, `packets/`, `game/`, `attack/`, `debug/`.
+  Headers continuam todos em `src/include/` (include path único `/Isrc\include`).
+  Commit `eb7708d` (movimentação pura, sem mudança de código).
 
 ## 5. Fase 4 — `PacketInjector` + porta única de injeção (D1)
 

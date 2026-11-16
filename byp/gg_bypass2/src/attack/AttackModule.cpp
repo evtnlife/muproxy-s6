@@ -9,6 +9,7 @@
 #include "PacketHandler.h"
 #include "MessageRegistry.h"
 #include "PacketSniffer.h"
+#include "PacketInjector.h"
 #include "SkillMap.h"
 #include "Logger.h"
 #include "CommandParams.h"
@@ -130,7 +131,7 @@ static uint8_t ComputeDirection(uint16_t targetEntityIndex) {
 //   - D2 = 0x78 CONSTANTE (disasm builder 0x5A1701: push 0x78; 0x78 em todas as 24 capturas)
 //   - D3 = direção 0..7 (disasm: [ebp-0x14] & 0x80000007)
 // Este buffer é o PLAINTEXT REAL. A criptografia (XorData [3,7) + Layer-1)
-// é aplicada em InjectC1Attack (PacketSniffer.cpp).
+// é aplicada em PacketInjector::Inject (src/packets/PacketInjector.cpp).
 static int BuildAttackPacket(uint8_t* outBuf, uint16_t entityIndex) {
     outBuf[0] = MuOpcodes::HEADER_C1;           // 0xC1
     outBuf[1] = MuOpcodes::SIZE_ATTACK_NORMAL;  // 0x07
@@ -149,7 +150,7 @@ static int BuildAttackPacket(uint8_t* outBuf, uint16_t entityIndex) {
 // Forward declaration
 static bool SendPlainPacket(const uint8_t* packet, int len);
 
-// ---- Skill Attack: monta o plaintext e injeta via InjectSkillC1 ----
+// ---- Skill Attack: monta o plaintext e injeta via PacketInjector::Inject ----
 // (XorData → SM → C3 0D → Layer-1 → wire; direto, sem fila)
 //
 // FORMATO CORRETO (decodificado da captura real do cliente S6, 2026-11-15):
@@ -165,7 +166,7 @@ static bool SendPlainPacket(const uint8_t* packet, int len);
 //
 // DIFERENTE do ataque normal 0x11 (que vai C1 puro): o skill passa por
 // XorData encadeado no payload → SimpleModulus → C3 0D [11] → Layer-1 → wire.
-// (InjectSkillC1 no PacketSniffer faz o pipeline completo.)
+// (PacketInjector::Inject escolhe o pipeline pelo opcode 0x19.)
 bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     uintptr_t localPlayer = GameMemory::GetLocalPlayer();
     uintptr_t targetObj = GameMemory::FindObjectByEntityIndex(entityIndex);
@@ -201,17 +202,17 @@ bool SendSkillAttack(uint16_t entityIndex, uint16_t skillId) {
     for (int i = 0; i < 7; i++)
         h += snprintf(hex + h, sizeof(hex) - h, "%02X ", plain[i]);
 
-    Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> InjectSkillC1", hex);
+    Logger::Log("ATTACK", "SkillAttack: plain=[%s] -> PacketInjector::Inject", hex);
 
     // Pipeline do skill (diferente do 0x11):
     //   XorData[3,7) → SM → C3 0D [11] → Layer-1 → wire
-    return PacketSniffer::InjectSkillC1(plain, 7);
+    return PacketInjector::Inject(plain, 7);
 }
 static bool SendPlainPacket(const uint8_t* packet, int len) {
     // Injeta DIRETO no socket do game server (sem round-trip via MuProxy2).
-    // O buffer e o PLAINTEXT REAL do ataque C1 0x11; InjectC1Attack aplica
-    // as duas camadas (XorData [3,len) + Layer-1) na ordem correta.
-    return PacketSniffer::InjectC1Attack(packet, len);
+    // O buffer e o PLAINTEXT REAL do ataque C1 0x11; PacketInjector::Inject
+    // aplica as duas camadas (XorData [3,len) + Layer-1) na ordem correta.
+    return PacketInjector::Inject(packet, len);
 }
 
 bool SendAttack(uint16_t entityIndex) {
@@ -519,9 +520,9 @@ REGISTER_MESSAGE(ATTACK_PLAYERIDX, HandleAttackPlayerIdx);
 static void HandleSendPacket(const char* payload) {
     // payload: "Server|C10711ED1F4486" (direção ignorada, sempre injeta C->S)
     // IMPORTANTE: o hex é a forma XorData-ENCRYPTED (a que o byp loga / o usuario
-    // copia do log), NAO o plaintext real. InjectToServer aplica so Layer-1.
+    // copia do log), NAO o plaintext real. InjectXorData aplica so Layer-1.
     // Ex.: C1 07 11 ED 1F 44 86 = XorData de C1 07 11 02 EE 78 07 (D2=0x78, D3=0x07).
-    // Para injetar o plaintext REAL de um ataque, use o SendAttack (InjectC1Attack).
+    // Para injetar o plaintext REAL de um ataque, use o SendAttack (PacketInjector::Inject).
     const char* hex = strchr(payload, '|');
     if (!hex) return;
     hex++; // pula o '|'
@@ -541,7 +542,7 @@ static void HandleSendPacket(const char* payload) {
 
     if (packetLen > 0) {
         // Injeta DIRETO no socket do game server (sem round-trip via MuProxy2)
-        if (PacketSniffer::InjectToServer(packet, packetLen)) {
+        if (PacketInjector::InjectXorData(packet, packetLen)) {
             Logger::Log("ATTACK", "SEND_PACKET: %d bytes injetados direto no GS", packetLen);
         } else {
             Logger::Log("ATTACK", "SEND_PACKET: FALHA ao injetar %d bytes (GS socket nao rastreado)", packetLen);
