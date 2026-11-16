@@ -3,7 +3,7 @@
 #include "PacketHandler.h"
 #include "MessageRegistry.h"
 #include "Logger.h"
-#include "TcpClient.h"
+#include "CommandChannel.h"
 #include "GameMemory.h"
 #include "MuOpcodes.h"
 

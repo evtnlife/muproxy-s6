@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "PacketSniffer.h"
-#include "Config.h"
 #include "Logger.h"
 #include "GameMemory.h"
 #include "MuCipher.h"
@@ -15,6 +14,9 @@
 #include "PacketReassembler.h"
 #include "NameRewriter.h"
 #include "PacketInjector.h"
+#include "PacketChannel.h"
+#include "CommandChannel.h"
+#include "OriginalApi.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -60,11 +62,6 @@ static void LogStackTrace(const char* prefix, uintptr_t* pEbp) {
 
 namespace PacketSniffer {
 
-static SOCKET g_TcpSocket = INVALID_SOCKET;
-static CRITICAL_SECTION g_TcpLock;
-static HANDLE g_ConnectThread = NULL;
-static HANDLE g_RecvThread = NULL;
-static bool g_Running = false;
 static bool g_Initialized = false;
 
 // Socket do game server do JOGO (conectado ao MuProxy2 → relay → GS real)
@@ -90,12 +87,11 @@ static std::map<LPWSAOVERLAPPED, OverlappedRecvCtx> g_OverlappedRecvMap;
 static CRITICAL_SECTION g_OverlappedLock;
 static bool g_OverlappedInit = false;
 
-// Socket de controle: conexao com MuProxy2 em 127.0.0.1:44412
-// Nao redirecionamos o IP/porta deste socket e nao logamos seus pacotes.
-static bool IsControlSocket(SOCKET s)
+// Sockets internos do byp (canais TCP com o MuProxy2): o hook de log nao
+// deve processar o trafego deles (sao linhas ASCII, nao pacotes MU).
+static bool IsInternalSocket(SOCKET s)
 {
-    if (s == INVALID_SOCKET || g_TcpSocket == INVALID_SOCKET) return false;
-    return s == g_TcpSocket;
+    return PacketChannel::IsChannelSocket(s) || CommandChannel::IsChannelSocket(s);
 }
 
 static int (WINAPI* TrueSend)(SOCKET s, const char* buf, int len, int flags) = nullptr;
@@ -119,204 +115,6 @@ static int (WINAPI* TrueWSAConnect)(SOCKET s, const sockaddr* name, int namelen,
 static void CALLBACK OverlappedRecvCompletion(DWORD dwError, DWORD cbTransferred,
     LPWSAOVERLAPPED lpOverlapped, DWORD dwFlags);
 
-static void EnsureWinsockStarted()
-{
-    static bool started = false;
-    if (!started)
-    {
-        WSADATA wsa;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa) == 0) started = true;
-    }
-}
-
-static void CloseTcpSocket()
-{
-    if (g_TcpSocket != INVALID_SOCKET)
-    {
-        closesocket(g_TcpSocket);
-        g_TcpSocket = INVALID_SOCKET;
-    }
-}
-
-static bool OpenTcpSocket()
-{
-    if (g_TcpSocket != INVALID_SOCKET) return true;
-    EnsureWinsockStarted();
-
-    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return false;
-
-    sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((u_short)Config::PACKET_SNIFFER_TCP_PORT);
-    inet_pton(AF_INET, Config::PACKET_SNIFFER_TCP_HOST, &addr.sin_addr);
-
-    int result = TrueConnect ? TrueConnect(s, (sockaddr*)&addr, sizeof(addr))
-                             : connect(s, (sockaddr*)&addr, sizeof(addr));
-    if (result == SOCKET_ERROR)
-    {
-        int err = WSAGetLastError();
-        closesocket(s);
-        // Log com throttle (10s): TcpConnectThread tenta a cada 1s, sem isso
-        // o log encheria durante o tempo que o MuProxy2 nao estiver ouvindo.
-        static DWORD lastFailLog = 0;
-        DWORD now = GetTickCount();
-        if (now - lastFailLog > 10000)
-        {
-            lastFailLog = now;
-            Logger::Log("PACKETSNIFFER", "Falha ao conectar %s:%d (err=%d)",
-                        Config::PACKET_SNIFFER_TCP_HOST, Config::PACKET_SNIFFER_TCP_PORT, err);
-        }
-        return false;
-    }
-
-    u_long mode = 1;
-    ioctlsocket(s, FIONBIO, &mode);
-    g_TcpSocket = s;
-    Logger::Log("PACKETSNIFFER", "Conectado ao MuProxy2 via TCP %s:%d",
-                Config::PACKET_SNIFFER_TCP_HOST, Config::PACKET_SNIFFER_TCP_PORT);
-    return true;
-}
-
-static DWORD WINAPI TcpConnectThread(LPVOID)
-{
-    while (g_Running)
-    {
-        EnterCriticalSection(&g_TcpLock);
-        if (g_TcpSocket == INVALID_SOCKET) OpenTcpSocket();
-        LeaveCriticalSection(&g_TcpLock);
-        Sleep(1000);
-    }
-    return 0;
-}
-
-// ============================================================================
-// Receive thread: le comandos do MuProxy2 (SEND <hex>)
-// ============================================================================
-static DWORD WINAPI TcpRecvThread(LPVOID)
-{
-    char buf[8192];
-    int bufPos = 0;
-
-    while (g_Running)
-    {
-        EnterCriticalSection(&g_TcpLock);
-        bool connected = (g_TcpSocket != INVALID_SOCKET);
-        SOCKET s = g_TcpSocket;
-        LeaveCriticalSection(&g_TcpLock);
-
-        if (!connected) { Sleep(500); continue; }
-
-        // Usa select() para esperar dados sem busy-wait
-        fd_set readSet;
-        FD_ZERO(&readSet);
-        FD_SET(s, &readSet);
-        timeval timeout = { 0, 500000 }; // 500ms
-        int sel = select(0, &readSet, NULL, NULL, &timeout);
-        if (sel <= 0) continue;
-
-        // Le dados disponiveis
-        char tmp[4096];
-        int r = recv(s, tmp, sizeof(tmp) - 1, 0);
-        if (r == SOCKET_ERROR)
-        {
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK) continue;
-            Logger::Log("PACKETSNIFFER", "TcpRecvThread: recv error %d", err);
-            CloseTcpSocket();
-            continue;
-        }
-        if (r == 0)
-        {
-            Logger::Log("PACKETSNIFFER", "TcpRecvThread: conexao fechada");
-            CloseTcpSocket();
-            continue;
-        }
-        tmp[r] = '\0';
-
-        // Acumula no buffer e processa linhas completas
-        for (int i = 0; i < r; i++)
-        {
-            if (tmp[i] == '\n')
-            {
-                buf[bufPos] = '\0';
-                if (bufPos > 0)
-                {
-                    // Comando SEND [dir] <hex>  (dir opcional, ignorado - sempre injeta C->S)
-                    if (strncmp(buf, "SEND ", 5) == 0)
-                    {
-                        char* args = buf + 5;
-                        // Pula token opcional de direcao
-                        char* hex = args;
-                        if (strncmp(args, "Client ", 7) == 0 ||
-                            strncmp(args, "Server ", 7) == 0 ||
-                            strncmp(args, "C->S ", 5) == 0 ||
-                            strncmp(args, "S->C ", 5) == 0)
-                        {
-                            // Avanca ate o proximo espaco
-                            while (*hex && *hex != ' ') hex++;
-                            while (*hex == ' ') hex++;
-                        }
-
-                        int hexLen = (int)strlen(hex);
-                        BYTE packet[2048];
-                        int packetLen = 0;
-                        for (int j = 0; j < hexLen; j += 2)
-                        {
-                            if (hex[j] == ' ' || hex[j] == '\r' || hex[j] == '\0') { j--; continue; }
-                            if (hex[j+1] == '\0') break;
-                            unsigned int byteVal;
-                            char tmpHex[3] = { hex[j], hex[j+1], 0 };
-                            if (sscanf_s(tmpHex, "%02X", &byteVal) == 1)
-                                packet[packetLen++] = (BYTE)byteVal;
-                        }
-
-                        if (packetLen > 0)
-                        {
-                            PacketInjector::InjectXorData(packet, packetLen);
-                        }
-                    }
-                }
-                bufPos = 0;
-            }
-            else if (bufPos < (int)sizeof(buf) - 1)
-            {
-                buf[bufPos++] = tmp[i];
-            }
-        }
-    }
-    return 0;
-}
-
-static void SendLine(const char* line, int len)
-{
-    EnterCriticalSection(&g_TcpLock);
-    if (!OpenTcpSocket())
-    {
-        LeaveCriticalSection(&g_TcpLock);
-        return;
-    }
-    int sent = 0;
-    while (sent < len)
-    {
-        int r = TrueSend ? TrueSend(g_TcpSocket, line + sent, len - sent, 0)
-                         : send(g_TcpSocket, line + sent, len - sent, 0);
-        if (r == SOCKET_ERROR)
-        {
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK)
-            {
-                Sleep(1);
-                continue;
-            }
-            CloseTcpSocket();
-            LeaveCriticalSection(&g_TcpLock);
-            return;
-        }
-        sent += r;
-    }
-    LeaveCriticalSection(&g_TcpLock);
-}
 // Porta do game server detectada automaticamente via pacote C116
 // (0xC1 0x16 = "ConnectToServer": login server informa IP+porta do GS).
 // 0 = ainda nao detectado (usa o range hardcoded abaixo).
@@ -423,7 +221,7 @@ static void OnReassembledPacket(void* ctx, const uint8_t* data, int len)
         line[pos++] = '\n';
     else
         return;
-    SendLine(line, pos);
+    PacketChannel::SendLine(line, pos);
 }
 
 // ============================================================================
@@ -436,7 +234,7 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
     if (len <= 0 || !data) return;
 
     // Pula o socket de controle do MuProxy
-    if (IsControlSocket(s)) return;
+    if (IsInternalSocket(s)) return;
 
     // Pula mensagens de LOG (comecam com "LOG " = 0x4C 0x4F 0x47 0x20)
     if (len >= 4 && (unsigned char)data[0] == 0x4C && (unsigned char)data[1] == 0x4F
@@ -885,15 +683,10 @@ static void* GetExportAddress(const char* name)
 bool Install()
 {
     if (g_Initialized) return true;
-    InitializeCriticalSection(&g_TcpLock);
     g_Initialized = true;
-    g_Running = true;
 
     // O módulo de injeção usa este módulo como transporte (socket do GS).
     PacketInjector::SetSender(SendToGameServer);
-
-    g_ConnectThread = CreateThread(NULL, 0, TcpConnectThread, NULL, 0, NULL);
-    g_RecvThread = CreateThread(NULL, 0, TcpRecvThread, NULL, 0, NULL);
 
     Logger::Log("PACKETSNIFFER", "Instalando inline hooks nas exports do ws2_32.dll");
 
@@ -931,6 +724,15 @@ bool Install()
     }
 
     Logger::Log("PACKETSNIFFER", "Total de hooks instalados=%d", g_HookCount);
+
+    // Expõe os trampolines (send/connect originais) para os canais TCP
+    // internos, que não devem passar pelo hook.
+    OriginalApi::Set(TrueSend, TrueConnect);
+
+    // O canal de pacotes (44413) sobe depois dos hooks: assim o connect já
+    // usa o trampoline original.
+    PacketChannel::Initialize();
+
     return g_HookCount > 0;
 }
 
@@ -941,14 +743,6 @@ void InstallHooksForAllModules()
 
 void Uninstall()
 {
-    g_Running = false;
-    if (g_ConnectThread)
-    {
-        WaitForSingleObject(g_ConnectThread, 1000);
-        CloseHandle(g_ConnectThread);
-        g_ConnectThread = NULL;
-    }
-
     for (int i = 0; i < g_HookCount; ++i)
     {
         if (!g_Hooks[i].installed || !g_Hooks[i].target) continue;
@@ -967,19 +761,10 @@ void Uninstall()
     }
     g_HookCount = 0;
 
-    CloseTcpSocket();
+    PacketChannel::Shutdown();
+
     g_GameServerSocket = INVALID_SOCKET;
-    if (g_RecvThread)
-    {
-        WaitForSingleObject(g_RecvThread, 1000);
-        CloseHandle(g_RecvThread);
-        g_RecvThread = NULL;
-    }
-    if (g_Initialized)
-    {
-        DeleteCriticalSection(&g_TcpLock);
-        g_Initialized = false;
-    }
+    g_Initialized = false;
 }
 
 // ============================================================================

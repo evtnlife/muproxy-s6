@@ -1,16 +1,20 @@
-// TcpClient.cpp — Implementação da conexão TCP com MuProxy2
+// CommandChannel.cpp — Canal de COMANDOS com o MuProxy2 (TCP 44412)
+//
+// Extraído do antigo TcpClient (Fase 5 do refactor reorganize-byp-modules).
+// O tag de log continua "TCPCLIENT" para manter a continuidade dos logs.
 #include "sdk.h"
 #include <mstcpip.h>
 #include <cstdio>
 #include <cstdarg>
 
-#include "TcpClient.h"
+#include "CommandChannel.h"
+#include "OriginalApi.h"
 #include "PacketHandler.h"
 #include "Logger.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
-namespace TcpClient {
+namespace CommandChannel {
 
 static const char* g_Host = "127.0.0.1";
 static int g_Port = 44412;
@@ -48,7 +52,12 @@ static bool DoConnect() {
     addr.sin_port = htons((u_short)g_Port);
     inet_pton(AF_INET, g_Host, &addr.sin_addr);
 
-    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+    // Usa o connect ORIGINAL (fora do hook) — o hook de connect reescreve o
+    // endereço e loga a cada tentativa, poluindo o log.
+    OriginalApi::ConnectFn origConnect = OriginalApi::GetConnect();
+    int result = origConnect ? origConnect(s, (sockaddr*)&addr, sizeof(addr))
+                              : connect(s, (sockaddr*)&addr, sizeof(addr));
+    if (result == SOCKET_ERROR) {
         int err = WSAGetLastError();
         Logger::Log("TCPCLIENT", "connect falhou para %s:%d (err=%d)", g_Host, g_Port, err);
         closesocket(s);
@@ -183,8 +192,10 @@ bool Send(const char* data, int len) {
     }
 
     int sent = 0;
+    OriginalApi::SendFn origSend = OriginalApi::GetSend();
     while (sent < len) {
-        int r = send(g_Socket, data + sent, len - sent, 0);
+        int r = origSend ? origSend(g_Socket, data + sent, len - sent, 0)
+                         : send(g_Socket, data + sent, len - sent, 0);
         if (r == SOCKET_ERROR) {
             int err = WSAGetLastError();
             if (err == WSAEWOULDBLOCK) { Sleep(1); continue; }
@@ -227,6 +238,14 @@ SOCKET GetSocket() {
     return s;
 }
 
+bool IsChannelSocket(SOCKET s) {
+    if (s == INVALID_SOCKET || !g_Initialized) return false;
+    EnterCriticalSection(&g_Lock);
+    bool same = (s == g_Socket);
+    LeaveCriticalSection(&g_Lock);
+    return same;
+}
+
 bool IsConnected() {
     if (!g_Initialized) return false;
     EnterCriticalSection(&g_Lock);
@@ -243,4 +262,4 @@ void Reconnect() {
     LeaveCriticalSection(&g_Lock);
 }
 
-} // namespace TcpClient
+} // namespace CommandChannel

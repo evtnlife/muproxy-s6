@@ -5,7 +5,7 @@
 #include "GameObject.h"
 #include "ObjType.h"
 #include "GameAddresses.h"
-#include "TcpClient.h"
+#include "CommandChannel.h"
 #include "PacketHandler.h"
 #include "MessageRegistry.h"
 #include "PacketSniffer.h"
@@ -368,11 +368,11 @@ static DWORD WINAPI WatcherThread(LPVOID) {
                     float dx = x - lx, dy = y - ly;
                     float dist = sqrtf(dx * dx + dy * dy);
 
-                    TcpClient::SendFormat("ENTITY|%d|%d|%d|%d|%.1f|%.1f|%.1f|%.1f|%s",
+                    CommandChannel::SendFormat("ENTITY|%d|%d|%d|%d|%.1f|%.1f|%.1f|%.1f|%s",
                         i, (int)entityIndex, (int)type, (int)level, x, y, z, dist, name);
                     objCount++;
                 }
-                TcpClient::SendFormat("ENTITY_BATCH_END|%d", objCount);
+                CommandChannel::SendFormat("ENTITY_BATCH_END|%d", objCount);
             }
 
             LeaveCriticalSection(&g_MapLock);

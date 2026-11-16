@@ -2,7 +2,7 @@
 #include <Logger.h>
 #include <Config.h>
 #include <PacketSniffer.h>
-#include <TcpClient.h>
+#include <CommandChannel.h>
 #include <PacketHandler.h>
 #include <MonsterTracker.h>
 #include <AttackModule.h>
@@ -127,7 +127,7 @@ static void SafeInitialize(HMODULE hModule) {
 
     // Inicializa TCP client e módulos de comunicação com MuProxy2
     if (Config::PACKET_SNIFFER_ENABLED || Config::MONSTER_TRACKER_ENABLED || Config::ATTACK_MODULE_ENABLED) {
-        TcpClient::Initialize(Config::TCP_HOST, Config::TCP_PORT);
+        CommandChannel::Initialize(Config::TCP_HOST, Config::TCP_PORT);
         PacketHandler::Initialize();
 
         if (Config::MONSTER_TRACKER_ENABLED) {
@@ -183,7 +183,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
             if (Config::MONSTER_TRACKER_ENABLED) MonsterTracker::Shutdown();
             if (Config::ATTACK_MODULE_ENABLED) AttackModule::Shutdown();
             PacketHandler::Shutdown();
-            TcpClient::Shutdown();
+            CommandChannel::Shutdown();
             PacketSniffer::Uninstall();
             // Remove exception handlers globais
             if (g_VehHandle) RemoveVectoredExceptionHandler(g_VehHandle);

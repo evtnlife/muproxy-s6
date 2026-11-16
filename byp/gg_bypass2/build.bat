@@ -22,7 +22,7 @@ echo Compilando gg_bypass2.dll...
 if not exist build mkdir build
 if not exist ..\dist mkdir ..\dist
 
-set SOURCES=src\core\dllmain.cpp src\core\Logger.cpp src\core\InlineHook.cpp src\crypto\MuCipher.cpp src\crypto\SimpleModulusCipher.cpp src\net\TcpClient.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\game\GameMemory.cpp src\game\MonsterTracker.cpp src\game\ViewportMap.cpp src\game\SkillMap.cpp src\game\SkillHook.cpp src\attack\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp
+set SOURCES=src\core\dllmain.cpp src\core\Logger.cpp src\core\InlineHook.cpp src\core\OriginalApi.cpp src\crypto\MuCipher.cpp src\crypto\SimpleModulusCipher.cpp src\net\CommandChannel.cpp src\net\PacketChannel.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\game\GameMemory.cpp src\game\MonsterTracker.cpp src\game\ViewportMap.cpp src\game\SkillMap.cpp src\game\SkillHook.cpp src\attack\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp
 
 cl.exe /nologo /O2 /LD /MD /W3 /Isrc\include %SOURCES% /Fobuild\ /link /DEF:src\Main.def /OUT:..\dist\byp.dll /MACHINE:X86 /OPT:REF /OPT:ICF
 

@@ -4,7 +4,7 @@
 #include "GameAddresses.h"
 #include "GameObject.h"
 #include "ObjType.h"
-#include "TcpClient.h"
+#include "CommandChannel.h"
 #include "Logger.h"
 #include "PacketHandler.h"
 
@@ -110,13 +110,13 @@ void SendFullListFiltered(int filterMask, float maxRange) {
             continue;
 
         // Formato tipado: "ENTITY|slot|compositeIdx|type|level|x|y|z|dist|name"
-        TcpClient::SendFormat("ENTITY|%d|%d|%d|%d|%.1f|%.1f|%.1f|%.1f|%s",
+        CommandChannel::SendFormat("ENTITY|%d|%d|%d|%d|%.1f|%.1f|%.1f|%.1f|%s",
             i, (int)compositeIndex, (int)type, (int)level, x, y, z, dist, name);
         count++;
     }
 
     // Envia marcador de fim
-    TcpClient::SendFormat("ENTITY_BATCH_END|%d", count);
+    CommandChannel::SendFormat("ENTITY_BATCH_END|%d", count);
     Logger::Log("MONSTER", "Lista enviada: %d objetos (filter=0x%X, range=%.1f)", count, filterMask, maxRange);
 }
 

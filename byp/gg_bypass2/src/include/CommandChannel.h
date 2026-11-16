@@ -2,16 +2,18 @@
 #include "sdk.h"
 
 // ============================================================================
-// TcpClient — Conexão TCP com o MuProxy2
+// CommandChannel — Canal de COMANDOS com o MuProxy2 (TCP 44412)
 //
 // Envia e recebe linhas de texto via TCP para 127.0.0.1:44412.
 // Thread-safe via CRITICAL_SECTION. Reconexão automática em thread separada.
 //
 // Protocolo: cada mensagem é uma linha terminada em \n.
-// Prefixos: "PKT " para pacotes, "CMD " para comandos, "LOG " para logs.
+// Prefixos: "CMD " para comandos, "ENTITY" para a lista de monstros.
+//
+// Não confundir com o PacketChannel (44413), que trafega o log de pacotes.
 // ============================================================================
 
-namespace TcpClient {
+namespace CommandChannel {
 
 bool Initialize(const char* host = "127.0.0.1", int port = 44412);
 void Shutdown();
@@ -28,10 +30,13 @@ bool SendFormat(const char* fmt, ...);
 // Retorna o socket atual (para uso em recv thread externa)
 SOCKET GetSocket();
 
+// True se o socket for o do canal de comandos (o hook de log deve ignorá-lo).
+bool IsChannelSocket(SOCKET s);
+
 // Verifica se está conectado
 bool IsConnected();
 
 // Fecha e reconecta
 void Reconnect();
 
-} // namespace TcpClient
+} // namespace CommandChannel
