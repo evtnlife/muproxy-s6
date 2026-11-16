@@ -206,3 +206,50 @@ SUCESSO: byp.dll criada em ..\dist\byp.dll
 Deploy para F:\blackrockmu\...
 DEPLOY OK
 ---
+
+## Knowledge Consolidation - 2026-11-16T14:37:04.050Z
+
+Justo — a change sem UI é change pela metade. Implementei a **Fase 6**.
+
+## O que entrou
+
+**byp (`AutoPotion.cpp`)** — o módulo agora manda o estado para o painel, pelo canal de comandos, ~1x/s:
+
+```
+POTION_STATE|active=1|hp=12|hpSrc=inv|mp=39|mpSrc=inv|items=47|life=202|lifeMax=214|mana=14|manaMax=219|warn=
+```
+
+O `hpSrc`/`mpSrc` diz **de onde veio o slot**: `inv` (inventário), `cfg` (digitado na UI), `apr` (modelo aprendido) ou `-`.
+
+**C# (`MuProxy2`)**:
+- `PotionStateMessage` (novo, tag `POTION_STATE`) em `Protocol/Messages.cs`
+- `DllCommandService.OnPotionState` (evento novo) + dispatch no `ProcessLine`
+- `MainForm` atualiza um label novo no rodapé do grupo de potion (`lblPotionState`):
+
+```
+HP 202/214 (94%)  slot 12 (inv)    MP 14/219 (6%)  slot 39 (inv)
+LIGADO | inventario: 47 itens
+```
+
+E em **vermelho** quando falta potion de algum tipo (`warn=`) — tipo `sem HP` / `sem MP`. Ou seja: o painel passa a mostrar **se o módulo está vendo o dano** e **qual slot ele está usando**, sem precisar ir caçar no log.
+
+## Estado dos builds
+
+- `byp.dll`: **OK** (deploy feito)
+- `MuProxy2.exe`: **OK** (0 warnings / 0 errors), reiniciado (PID 10924)
+- `openspec/changes/auto-potion-autonomo/tasks.md`: Fase 6 marcada
+
+## O que falta é só o teste de campo
+
+O build mata o `main.exe`, então **sobe o jogo** e olha o log:
+
+```
+[POTION] C4-SM decodificado ...              ← o C4 de 784 bytes (o inventário)
+[POTION] lista de itens (F3 10): 47 item(ns)
+[POTION] pocoes no inventario: 3 slot(s) de HP, 2 de MP
+```
+
+Se a linha `lista de itens` aparecer, o slot vem do inventário (não precisa beber nada) e a UI deve mostrar `slot 12 (inv)` sozinho. Se aparecer `-` na UI, é porque o inventário ainda não chegou — me manda a linha do log do `C4` que eu ajusto.
+
+Observação: o `F3 03` (character info) que vem no C3 de 233 bytes tem layout **clássico** (WORDs big-endian), diferente do `F3 E0` que o byp parseia; como o `F3 E1` já entrega `maxLife/maxMana` (214/219), deixei o `F3 03` de fora por enquanto — se o `max` em algum momento não chegar, esse é o ponto a ajustar.
+---

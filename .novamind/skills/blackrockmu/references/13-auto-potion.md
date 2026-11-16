@@ -33,6 +33,53 @@ questão aberta sobre movimento.
 - O `XorData` **não** é auto-inverso in-place: ao decodificar, o byte anterior usado
   precisa ser o **cifrado** → a ordem tem que ser decrescente.
 
+## Potions: como o servidor identifica o item (e onde está o nome)
+
+O servidor decide o efeito pelo **ID do item** (`GET_ITEM(grupo,idx) = grupo*512 + idx`,
+`MAX_ITEM_TYPE=512`) e **não** pelo slot:
+
+| ID | item | efeito |
+|----|------|--------|
+| 7168..7171 | 14,0..3 (Apple, Small/Middle/Large Healing) | HP (% do MaxLife) |
+| 7172..7174 | 14,4..6 (Small/Middle/Large Mana) | MP (% do MaxMana) |
+| 7206..7208 | 14,38..40 (Small/Middle/Large Complex) | HP + SD |
+| 7238 / 7239 | 14,70 / 14,71 (Elite Healing / Mana) | HP / MP |
+| 6773..6776 | **13,117..120 ("Vitality Potion")** — exclusivo do BlackRock | HP |
+
+### O ID dentro dos 12 bytes do ItemInfo (a pegadinha)
+
+`CItemManager::ItemByteConvert` (GameServer/ItemManager.cpp) monta os bytes:
+
+```
+lpMsg[0] = m_Index & 0xFF;                    // índice bits 0..7
+lpMsg[3] |= (m_Index & 256) >> 1;              // índice bit 8
+lpMsg[5] |= (m_Index & GET_ITEM(15,0)) >> 5;   // grupo (bits 9..12 do índice) → bits 4..7 do byte5
+```
+
+Logo o decode é `id = info[0] | ((info[3]&0x02)<<7) | (((info[5]>>4)&0x0F)<<9)`.
+**O grupo é o nibble ALTO do byte 5** — ler os bits 3..6 (o erro que o byp tinha) devolve o
+grupo pela metade: o "Scroll of Twister" (15,7) virava "Siege Potion" (14,7) e as potions
+de verdade passavam despercebidas.
+
+### Nomes dos itens (para log/UI)
+
+`F:\blackrockmu\Data\Local\Eng\ItemTooltip_eng.txt` é **texto puro**:
+`grupo<TAB>indice<TAB>"Nome"<TAB>...` (931 itens). Serve para conferir o decode offline:
+com o decode certo os IDs do inventário viram nomes coerentes ("Battle Scepter",
+"Serpent Shield", "Jewel of Bless"...); com o decode errado saem coisas sem sentido.
+
+### Pacotes do inventário (S→C)
+
+| pacote | formato | uso |
+|--------|---------|-----|
+| `F3 10` (no C4 do login) | `[count][slot(1) + ItemInfo(12)]*count` | lista completa do inventário |
+| `F3 14` | `[slot(1) + ItemInfo(12)]` | **cada mudança** no inventário (pegar/gastar/mover) |
+| `C1 28` | `[slot(1) + flag(1)]` | item removido (potion gasta) |
+
+O `F3 10` só chega no login — sem o `F3 14` o módulo fica cego para potions pegas
+depois. `F3 14` e `C1 28` podem vir em C3 (SimpleModulus) → usar
+`AutoPotion::OnServerPacket`, que já decodifica o corpo.
+
 ## Como o módulo descobre o slot do inventário ("learn & replay")
 O inventário do **cliente** não está mapeado (`ObjectCharacter` tem só
 `pEquipment[12]` + dinheiro) — o slot flat do servidor só o cliente sabe. Então:
@@ -56,13 +103,29 @@ Quem manda no slot pode ser o modelo aprendido **ou** a config
 |-----|---------|--------|
 | `POTION_START` | — | liga o auto-potion |
 | `POTION_STOP` | — | desliga |
-| `POTION_CONFIG` | `hp=50|mp=30|interval=1000|hpslot=..|mpslot=..` | limiares (%) / intervalo (ms) / slots |
+| `POTION_CONFIG` | `hp=50\|mp=30\|interval=1000\|hpslot=..\|mpslot=..` | limiares (%) / intervalo (ms) / slots |
+| `POTION_APPLY` | igual ao CONFIG | **aplica a config E liga** numa mensagem só (idempotente) |
 | `POTION_STATUS` | — | loga o estado (limiares, modelos, life/mana) |
 
 - `hp`/`mp` = percentual que **dispara** a potion (default 50 / 30);
 - `interval` = intervalo mínimo entre usos em ms (default **1000**, conservador
   por causa do anti-hack do servidor);
 - `hpslot`/`mpslot` = slot flat do inventário (opcional; sem eles vale o modelo aprendido).
+
+### Regra de estado (UI ↔ módulo)
+
+O checkbox da UI **é** o estado do módulo: marcado = ligado. Não existe botão
+"Aplicar" — a UI manda `POTION_APPLY` (debounce de 400 ms) em qualquer mudança e
+`POTION_STOP` quando desmarca.
+
+⚠️ O `POTION_APPLY` do byp **não descarta** mensagem nenhuma (o módulo tem que
+aceitar uma reconfig legitimate logo depois de outra). E o `POTION_STATE` (1x/s,
+com `active=0|1`) é a fonte de verdade: se ele disser `active=0` com o checkbox
+marcado, é porque o byp reiniciou — a UI reaplica.
+
+O byp.dll é recarregado junto com o jogo: ao reconectar no canal 44412 o módulo
+volta do zero (config default, desligado). Por isso a UI reaplica o estado
+**na conexão**, não só no clique.
 
 ## Log (tag `POTION`)
 ```

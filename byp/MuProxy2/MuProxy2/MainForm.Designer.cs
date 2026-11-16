@@ -51,16 +51,7 @@ namespace WinFormsMitm
             txtPotionMp = new TextBox();
             labelPotionInterval = new Label();
             txtPotionInterval = new TextBox();
-            labelPotionHpItem = new Label();
-            txtPotionHpItem = new TextBox();
-            labelPotionMpItem = new Label();
-            txtPotionMpItem = new TextBox();
-            labelPotionHpSlot = new Label();
-            txtPotionHpSlot = new TextBox();
-            labelPotionMpSlot = new Label();
-            txtPotionMpSlot = new TextBox();
-            btnPotionApply = new Button();
-            btnPotionStatus = new Button();
+            lblPotionState = new Label();
             statusStrip1 = new StatusStrip();
             toolTipPlayerCoord = new ToolStripStatusLabel();
             toolTipPlayerInfo = new ToolStripStatusLabel();
@@ -404,19 +395,10 @@ namespace WinFormsMitm
             groupBoxPotion.Controls.Add(txtPotionMp);
             groupBoxPotion.Controls.Add(labelPotionInterval);
             groupBoxPotion.Controls.Add(txtPotionInterval);
-            groupBoxPotion.Controls.Add(labelPotionHpItem);
-            groupBoxPotion.Controls.Add(txtPotionHpItem);
-            groupBoxPotion.Controls.Add(labelPotionMpItem);
-            groupBoxPotion.Controls.Add(txtPotionMpItem);
-            groupBoxPotion.Controls.Add(labelPotionHpSlot);
-            groupBoxPotion.Controls.Add(txtPotionHpSlot);
-            groupBoxPotion.Controls.Add(labelPotionMpSlot);
-            groupBoxPotion.Controls.Add(txtPotionMpSlot);
-            groupBoxPotion.Controls.Add(btnPotionApply);
-            groupBoxPotion.Controls.Add(btnPotionStatus);
+            groupBoxPotion.Controls.Add(lblPotionState);
             groupBoxPotion.Location = new Point(8, 265);
             groupBoxPotion.Name = "groupBoxPotion";
-            groupBoxPotion.Size = new Size(425, 245);
+            groupBoxPotion.Size = new Size(425, 200);
             groupBoxPotion.TabIndex = 5;
             groupBoxPotion.TabStop = false;
             groupBoxPotion.Text = "Auto Potion";
@@ -483,99 +465,21 @@ namespace WinFormsMitm
             txtPotionInterval.Size = new Size(53, 23);
             txtPotionInterval.TabIndex = 6;
             txtPotionInterval.Text = "1000";
-            //
-            // labelPotionHpItem
-            //
-            labelPotionHpItem.AutoSize = true;
-            labelPotionHpItem.Location = new Point(11, 146);
-            labelPotionHpItem.Name = "labelPotionHpItem";
-            labelPotionHpItem.Size = new Size(118, 15);
-            labelPotionHpItem.TabIndex = 7;
-            labelPotionHpItem.Text = "Item de HP (hex)";
-            //
-            // txtPotionHpItem
-            //
-            txtPotionHpItem.Location = new Point(133, 142);
-            txtPotionHpItem.Name = "txtPotionHpItem";
-            txtPotionHpItem.Size = new Size(60, 23);
-            txtPotionHpItem.TabIndex = 8;
-            txtPotionHpItem.PlaceholderText = "0x0C";
-            txtPotionHpItem.Text = "";
-            //
-            // labelPotionMpItem
-            //
-            labelPotionMpItem.AutoSize = true;
-            labelPotionMpItem.Location = new Point(210, 146);
-            labelPotionMpItem.Name = "labelPotionMpItem";
-            labelPotionMpItem.Size = new Size(118, 15);
-            labelPotionMpItem.TabIndex = 9;
-            labelPotionMpItem.Text = "Item de MP (hex)";
-            //
-            // txtPotionMpItem
-            //
-            txtPotionMpItem.Location = new Point(332, 142);
-            txtPotionMpItem.Name = "txtPotionMpItem";
-            txtPotionMpItem.Size = new Size(60, 23);
-            txtPotionMpItem.TabIndex = 10;
-            txtPotionMpItem.PlaceholderText = "0x1C05";
-            txtPotionMpItem.Text = "";
-            //
-            // labelPotionHpSlot
-            //
-            labelPotionHpSlot.AutoSize = true;
-            labelPotionHpSlot.Location = new Point(11, 186);
-            labelPotionHpSlot.Name = "labelPotionHpSlot";
-            labelPotionHpSlot.Size = new Size(118, 15);
-            labelPotionHpSlot.TabIndex = 11;
-            labelPotionHpSlot.Text = "Slot de HP";
-            //
-            // txtPotionHpSlot
-            //
-            txtPotionHpSlot.Location = new Point(133, 182);
-            txtPotionHpSlot.Name = "txtPotionHpSlot";
-            txtPotionHpSlot.Size = new Size(60, 23);
-            txtPotionHpSlot.TabIndex = 12;
-            txtPotionHpSlot.PlaceholderText = "auto";
-            txtPotionHpSlot.Text = "";
-            //
-            // labelPotionMpSlot
-            //
-            labelPotionMpSlot.AutoSize = true;
-            labelPotionMpSlot.Location = new Point(210, 186);
-            labelPotionMpSlot.Name = "labelPotionMpSlot";
-            labelPotionMpSlot.Size = new Size(118, 15);
-            labelPotionMpSlot.TabIndex = 13;
-            labelPotionMpSlot.Text = "Slot de MP";
-            //
-            // txtPotionMpSlot
-            //
-            txtPotionMpSlot.Location = new Point(332, 182);
-            txtPotionMpSlot.Name = "txtPotionMpSlot";
-            txtPotionMpSlot.Size = new Size(60, 23);
-            txtPotionMpSlot.TabIndex = 14;
-            txtPotionMpSlot.PlaceholderText = "auto";
-            txtPotionMpSlot.Text = "";
             // 
-            // btnPotionApply
+            // lblPotionState
             // 
-            btnPotionApply.Location = new Point(180, 101);
-            btnPotionApply.Name = "btnPotionApply";
-            btnPotionApply.Size = new Size(80, 25);
-            btnPotionApply.TabIndex = 7;
-            btnPotionApply.Text = "Aplicar";
-            btnPotionApply.UseVisualStyleBackColor = true;
-            // 
-            // btnPotionStatus
-            // 
-            btnPotionStatus.Location = new Point(270, 101);
-            btnPotionStatus.Name = "btnPotionStatus";
-            btnPotionStatus.Size = new Size(80, 25);
-            btnPotionStatus.TabIndex = 8;
-            btnPotionStatus.Text = "Status";
-            btnPotionStatus.UseVisualStyleBackColor = true;
-            // 
+            lblPotionState.AutoSize = false;
+            lblPotionState.BorderStyle = BorderStyle.FixedSingle;
+            lblPotionState.Font = new Font("Microsoft Sans Serif", 8F);
+            lblPotionState.Location = new Point(11, 140);
+            lblPotionState.Name = "lblPotionState";
+            lblPotionState.Padding = new Padding(3, 2, 3, 2);
+            lblPotionState.Size = new Size(400, 46);
+            lblPotionState.TabIndex = 14;
+            lblPotionState.Text = "auto-potion: aguardando o byp.dll...";
+            //
             // statusStrip1
-            // 
+            //
             statusStrip1.Items.AddRange(new ToolStripItem[] { toolTipPlayerCoord, toolTipPlayerInfo });
             statusStrip1.Location = new Point(3, 662);
             statusStrip1.Name = "statusStrip1";
@@ -1039,15 +943,6 @@ namespace WinFormsMitm
         private TextBox txtPotionMp;
         private Label labelPotionInterval;
         private TextBox txtPotionInterval;
-        private Label labelPotionHpItem;
-        private TextBox txtPotionHpItem;
-        private Label labelPotionMpItem;
-        private TextBox txtPotionMpItem;
-        private Label labelPotionHpSlot;
-        private TextBox txtPotionHpSlot;
-        private Label labelPotionMpSlot;
-        private TextBox txtPotionMpSlot;
-        private Button btnPotionApply;
-        private Button btnPotionStatus;
-    }
+        private Label lblPotionState;
+        }
 }

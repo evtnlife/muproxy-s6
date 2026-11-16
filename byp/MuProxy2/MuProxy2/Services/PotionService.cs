@@ -21,17 +21,9 @@ namespace WinFormsMitm.Services
         public int HpItemId { get; set; } = -1;      // ID do item (hex) — o byp resolve o slot
         public int MpItemId { get; set; } = -1;      // pela lista de inventário (F3 10)
 
+        // Estado do módulo no byp (o checkbox da UI é a fonte da verdade).
         private bool _enabled;
-        public bool Enabled
-        {
-            get => _enabled;
-            set
-            {
-                if (value == _enabled) return;
-                _enabled = value;
-                OnStateChanged?.Invoke(value);
-            }
-        }
+        public bool Enabled => _enabled;
 
         // ---- Eventos para UI ----
         public event Action<bool>? OnStateChanged;
@@ -42,27 +34,9 @@ namespace WinFormsMitm.Services
             _log = log;
         }
 
-        public void Start()
-        {
-            // Só liga/desliga. A configuração é enviada pelo botão "Aplicar"
-            // (POTION_APPLY) — mandar a config junto fazia o módulo ficar
-            // meio-morto (STOP -> CONFIG -> START) a cada clique.
-            var msg = new PotionStartMessage();
-            string wire = msg.ToWire();
-
-            int sent = _dll.SendCommand(wire);
-            if (sent > 0)
-            {
-                _enabled = true;
-                OnStateChanged?.Invoke(true);
-                _log?.Invoke($"[POTION] START -> {wire}");
-            }
-            else
-            {
-                _log?.Invoke("[POTION] ERRO: byp.dll não conectada");
-            }
-        }
-
+        /// <summary>
+        /// Desliga o auto-potion (POTION_STOP).
+        /// </summary>
         public void Stop()
         {
             var msg = new PotionStopMessage();
@@ -73,9 +47,9 @@ namespace WinFormsMitm.Services
         }
 
         /// <summary>
-        /// Botão "Aplicar": manda UMA mensagem que aplica a configuração e
-        /// arma o módulo (idempotente). Também serve para "religar" o
-        /// auto-potion sem precisar mexer no checkbox.
+        /// Aplica a configuração E liga o auto-potion em UMA mensagem
+        /// (POTION_APPLY). É o que a UI manda a cada mudança (debounce) e
+        /// quando o byp.dll reconecta (o módulo volta do zero com o jogo).
         /// </summary>
         public void Apply()
         {
@@ -101,31 +75,6 @@ namespace WinFormsMitm.Services
             {
                 _log?.Invoke("[POTION] ERRO: byp.dll não conectada");
             }
-        }
-
-        public void SendConfig()
-        {
-            var msg = new PotionConfigMessage
-            {
-                HpThreshold = HpThreshold,
-                MpThreshold = MpThreshold,
-                IntervalMs = IntervalMs,
-                HpSlot = HpSlot,
-                MpSlot = MpSlot,
-                HpItemId = HpItemId,
-                MpItemId = MpItemId
-            };
-            string wire = msg.ToWire();
-            _dll.SendCommand(wire);
-            _log?.Invoke($"[POTION] CONFIG -> {wire}");
-        }
-
-        /// <summary>Pede o estado do módulo (resposta no log do byp.dll).</summary>
-        public void RequestStatus()
-        {
-            var msg = new PotionStatusMessage();
-            _dll.SendCommand(msg.ToWire());
-            _log?.Invoke("[POTION] STATUS solicitado (resposta no log)");
         }
     }
 }

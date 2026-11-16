@@ -1,34 +1,26 @@
 [
   {
-    "content": "Diagnóstico: vitais travados no MaxLife (type 0xFE do C1 26/27 tratado como vida atual)",
+    "content": "Diagnosticar por que o auto-potion só 'pegava' após clicar em Aplicar",
     "status": "completed"
   },
   {
-    "content": "AutoPotion: byte 'type' + fontes com timestamp + log do motivo de não disparar",
+    "content": "Remover o botão 'Aplicar' — o checkbox vira a fonte da verdade (debounce 400ms → POTION_APPLY / POTION_STOP)",
     "status": "completed"
   },
   {
-    "content": "Diagnóstico novo: servidor BlackRock NÃO manda life/mana MÁXIMO em nenhum pacote (dump cru confirmou)",
+    "content": "Reaplicar o estado quando o byp.dll reconecta (o módulo volta do zero com o jogo)",
     "status": "completed"
   },
   {
-    "content": "ClientVitals: localizar e ler ViewCurHP/ViewMaxHP/ViewCurMP/ViewMaxMP no main.exe (assinatura life/mana/BP/escudo)",
+    "content": "Resync quando o POTION_STATE diz active=0 com o checkbox marcado",
     "status": "completed"
   },
   {
-    "content": "AutoPotion: usar os vitais do cliente como fonte primária (traz o MÁXIMO)",
+    "content": "byp: POTION_APPLY não descarta mais mensagem (debounce de 1s engolia config legítima)",
     "status": "completed"
   },
   {
-    "content": "UI: debounce do botão Aplicar (repeat de teclado gerava 6-8 mensagens)",
+    "content": "Build byp.dll + MuProxy2, reiniciar o app e conferir a UI (sem botão Aplicar)",
     "status": "completed"
-  },
-  {
-    "content": "Build + deploy (byp.dll + MuProxy2) — OK",
-    "status": "completed"
-  },
-  {
-    "content": "Teste: reiniciar o jogo, confirmar 'ClientVitals: ... maxLife=214 maxMana=219' e a potion disparando",
-    "status": "pending"
   }
 ]

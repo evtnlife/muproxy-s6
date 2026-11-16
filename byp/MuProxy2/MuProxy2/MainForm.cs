@@ -22,9 +22,12 @@ namespace WinFormsMitm
 // checkbox -> serviço -> checkbox).
 private bool _potionUiSync;
 
-// Debounce do botão "Aplicar" (o repeat de teclado dispara o Click várias
-// vezes por segundo).
-private long _lastPotionApplyTicks;
+// Debounce da aplicação do auto-potion: qualquer mudança (limiar, intervalo,
+// checkbox) agenda UM POTION_APPLY. O estado do checkbox É o estado do módulo.
+private readonly System.Windows.Forms.Timer _potionApplyTimer = new() { Interval = 400 };
+
+// Último re-sync com o byp (evita repetir a cada tick de 1s).
+private long _lastPotionResyncTicks;
 
         private TcpLoopbackProxy? _proxy;
 
@@ -111,6 +114,21 @@ private long _lastPotionApplyTicks;
             };
 
             _hookListener = new HookListenerService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
+
+            // Debounce: a configuração (e o liga/desliga) sai uma única vez,
+            // depois que o usuário para de mexer nos campos.
+            _potionApplyTimer.Tick += (s, e) =>
+            {
+                _potionApplyTimer.Stop();
+                ApplyPotionState();
+            };
+
+    // Estado do auto-potion (vem do byp.dll pelo canal de comandos, 1x/s).
+    _dll.OnPotionState += st =>
+    {
+        if (InvokeRequired) { BeginInvoke(() => UpdatePotionState(st)); return; }
+        UpdatePotionState(st);
+    };
 
             SetupLogFilters();
             OpenLogFile();
@@ -275,97 +293,110 @@ private long _lastPotionApplyTicks;
         {
         if (_potionService == null) return;
 
+        // O checkbox É o estado: marcado = auto-potion ligado, desmarcado =
+        // desligado. Não existe botão "Aplicar" — a configuração é aplicada
+        // sozinha (debounce de 400 ms) em qualquer mudança.
         chkAutoPotion.CheckedChanged += (s, e) =>
         {
             if (_potionService == null || _potionUiSync) return;
-            if (chkAutoPotion.Checked)
-                _potionService.Start();
-            else
-                _potionService.Stop();
+            SchedulePotionApply();
         };
 
-        // Os campos só atualizam o serviço — NENHUMA mensagem sai daqui.
-        // (Antes cada tecla digitada disparava um POTION_CONFIG.)
+        // Os campos atualizam o serviço e agendam a aplicação.
         txtPotionHp.TextChanged += (s, e) =>
         {
             if (int.TryParse(txtPotionHp.Text, out int hp) && hp >= 0 && hp <= 100 && _potionService != null)
+            {
                 _potionService.HpThreshold = hp;
+                SchedulePotionApply();
+            }
         };
 
         txtPotionMp.TextChanged += (s, e) =>
         {
             if (int.TryParse(txtPotionMp.Text, out int mp) && mp >= 0 && mp <= 100 && _potionService != null)
+            {
                 _potionService.MpThreshold = mp;
+                SchedulePotionApply();
+            }
         };
 
         txtPotionInterval.TextChanged += (s, e) =>
         {
             if (int.TryParse(txtPotionInterval.Text, out int ms) && ms >= 100 && _potionService != null)
+            {
                 _potionService.IntervalMs = ms;
+                SchedulePotionApply();
+            }
         };
 
-        // ID do item da potion (hex) — o byp resolve o slot pela lista de
-        // inventário que o servidor manda (F3 10). Vazio = usa o modelo
-        // aprendido pelo próprio jogo.
-        txtPotionHpItem.TextChanged += (s, e) =>
-        {
-            if (_potionService == null) return;
-            _potionService.HpItemId = ParseItemId(txtPotionHpItem.Text);
-        };
-
-        txtPotionMpItem.TextChanged += (s, e) =>
-        {
-            if (_potionService == null) return;
-            _potionService.MpItemId = ParseItemId(txtPotionMpItem.Text);
-        };
-
-        // Slot do inventário (número da célula no jogo). Vazio = usa o
-        // modelo aprendido pelo próprio jogo (beber a potion uma vez).
-        txtPotionHpSlot.TextChanged += (s, e) =>
-        {
-            if (_potionService == null) return;
-            _potionService.HpSlot = ParseSlot(txtPotionHpSlot.Text);
-        };
-
-        txtPotionMpSlot.TextChanged += (s, e) =>
-        {
-            if (_potionService == null) return;
-            _potionService.MpSlot = ParseSlot(txtPotionMpSlot.Text);
-        };
-
-        // "Aplicar": UMA mensagem (POTION_APPLY) — aplica a configuração e arma
-        // o módulo de uma vez. É também o jeito de religar o auto-potion.
-        // Debounce: segurar a tecla do botão (repeat do Windows) dispara o Click
-        // várias vezes por segundo.
-        btnPotionApply.Click += (s, e) =>
-        {
-            if (_potionService == null) return;
-            long nowTicks = DateTime.UtcNow.Ticks;
-            if (nowTicks - _lastPotionApplyTicks < 5_000_000L) return;   // 500 ms
-            _lastPotionApplyTicks = nowTicks;
-            _potionService.Apply();
-        };
-        btnPotionStatus.Click += (s, e) => _potionService?.RequestStatus();
+        // O slot e o item da potion NÃO são configuráveis aqui: o byp descobre
+        // sozinho pela lista de inventário que o servidor manda (F3 10 no login
+        // e F3 14 a cada mudança) e mostra o que achou no painel de estado
+        // (slot + nome da potion). Sem digitar hex nem adivinhar slot.
         }
 
-        /// <summary>Converte "0x1F" / "1F" / "31" no ID do item (-1 = vazio).</summary>
-        private static int ParseItemId(string text)
+        /// <summary>
+        /// Agenda a aplicação da configuração no byp (debounce: digitar "50"
+        /// dispara UM POTION_APPLY, não cinco).
+        /// </summary>
+        private void SchedulePotionApply()
         {
-            if (string.IsNullOrWhiteSpace(text)) return -1;
-            string t = text.Trim();
-            if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) t = t.Substring(2);
-            if (!int.TryParse(t, System.Globalization.NumberStyles.HexNumber, null, out int id)) return -1;
-            if (id < 0 || id > 0xFFFF) return -1;
-            return id;
+            _potionApplyTimer.Stop();
+            _potionApplyTimer.Start();
         }
 
-        /// <summary>Slot do inventário (-1 = vazio = usa o modelo aprendido).</summary>
-        private static int ParseSlot(string text)
+        /// <summary>
+        /// Traduz o estado do checkbox em comando do byp:
+        /// marcado → POTION_APPLY (config + liga), desmarcado → POTION_STOP.
+        /// </summary>
+        private void ApplyPotionState()
         {
-            if (string.IsNullOrWhiteSpace(text)) return -1;
-            if (!int.TryParse(text.Trim(), out int slot)) return -1;
-            if (slot < 0 || slot > 255) return -1;
-            return slot;
+            if (_potionService == null) return;
+            if (chkAutoPotion.Checked) _potionService.Apply();
+            else _potionService.Stop();
+        }
+
+        /// <summary>
+        /// Estado do auto-potion (o byp.dll manda 1x/s): life/mana, slot em uso
+        /// de HP/MP, o NOME da potion que ele achou no inventário e o aviso
+        /// quando falta potion.
+        /// </summary>
+        private void UpdatePotionState(PotionStateMessage st)
+        {
+            if (lblPotionState == null) return;
+
+            string SlotTxt(int slot, string src, string name)
+            {
+                if (slot < 0) return "-";
+                return string.IsNullOrEmpty(name) ? $"{slot} ({src})" : $"{slot} ({name})";
+            }
+            int hpPct = st.LifeMax > 0 ? (int)(st.Life * 100 / st.LifeMax) : 0;
+            int mpPct = st.ManaMax > 0 ? (int)(st.Mana * 100 / st.ManaMax) : 0;
+
+            string txt =
+                $"HP {st.Life}/{st.LifeMax} ({hpPct}%)  slot {SlotTxt(st.HpSlot, st.HpSource, st.HpName)}    " +
+                $"MP {st.Mana}/{st.ManaMax} ({mpPct}%)  slot {SlotTxt(st.MpSlot, st.MpSource, st.MpName)}\n" +
+                $"{(st.Active ? "LIGADO" : "DESLIGADO")}  |  inventario: {st.Items} item(ns)" +
+                (string.IsNullOrEmpty(st.Warn) ? "" : $"  |  ATENCAO: {st.Warn}");
+
+            lblPotionState.Text = txt;
+            lblPotionState.ForeColor = string.IsNullOrEmpty(st.Warn)
+                ? SystemColors.ControlText
+                : Color.FromArgb(180, 0, 0);
+
+            // O byp é a fonte da verdade: se ele está desligado e o checkbox
+            // está marcado (ex.: o jogo reiniciou e o byp voltou do zero), o
+            // estado da UI e do módulo precisam coincidir — reaplica.
+            if (chkAutoPotion.Checked && !st.Active)
+            {
+                long now = DateTime.UtcNow.Ticks;
+                if (now - _lastPotionResyncTicks > 10_000_000L)   // 10 s
+                {
+                    _lastPotionResyncTicks = now;
+                    SchedulePotionApply();
+                }
+            }
         }
 
         // ============ UI: Skills ============
@@ -822,6 +853,12 @@ private long _lastPotionApplyTicks;
                     await Task.Delay(500);
                     _dll.SendCommand(new MonsterStartMessage { Interval = 500, Filter = 6 }.ToWire());
                 });
+                // O byp.dll é recarregado junto com o jogo: o auto-potion volta
+                // ao padrão (desligado) do outro lado. Reaplica o que a UI
+                // mostra — sem isso o checkbox ficaria "ligado" sem efeito e o
+                // usuário teria que desmarcar/marcar para o byp acordar.
+                if (InvokeRequired) { BeginInvoke(SchedulePotionApply); return; }
+                SchedulePotionApply();
             };
         }
 
@@ -836,6 +873,8 @@ private long _lastPotionApplyTicks;
         {
             _logThrottleTimer?.Stop();
             _logThrottleTimer?.Dispose();
+            _potionApplyTimer.Stop();
+            _potionApplyTimer.Dispose();
             StopHookServer();
             _dll?.Dispose();
             _logFile?.Dispose();

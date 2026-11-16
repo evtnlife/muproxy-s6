@@ -254,4 +254,58 @@ namespace WinFormsMitm.Protocol
             return s;
         }
     }
+
+    /// <summary>
+    /// Estado do auto-potion (vinda do byp.dll, 1x por segundo).
+    /// Formato: POTION_STATE|active=1|hp=12|hpSrc=inv|hpName=Healing Potion|
+    ///          mp=39|mpSrc=inv|mpName=Mana Potion|items=47|
+    ///          life=202|lifeMax=214|mana=14|manaMax=219|warn=
+    /// hp/mp = slot em uso (-1 = nenhum); hpSrc/mpSrc = origem
+    /// (inv=inventário, cfg=manual, id=ID de item, apr=aprendido, -=nenhum);
+    /// hpName/mpName = nome da potion em uso (vazio se não houver);
+    /// warn = aviso (ex.: "sem potion de HP").
+    /// </summary>
+    [MessageTag("POTION_STATE")]
+    public class PotionStateMessage
+    {
+        public bool Active;
+        public int HpSlot = -1, MpSlot = -1;
+        public string HpSource = "-", MpSource = "-";
+        public string HpName = "", MpName = "";
+        public int Items;
+        public uint Life, LifeMax, Mana, ManaMax;
+        public string Warn = "";
+
+        public static PotionStateMessage Parse(string payload)
+        {
+            var m = new PotionStateMessage();
+            foreach (var part in payload.Split('|'))
+            {
+                int eq = part.IndexOf('=');
+                if (eq <= 0) continue;
+                string k = part.Substring(0, eq);
+                string v = part.Substring(eq + 1);
+                switch (k)
+                {
+                    case "active": m.Active = v == "1"; break;
+                    case "hp": m.HpSlot = SafeInt(v); break;
+                    case "mp": m.MpSlot = SafeInt(v); break;
+                    case "hpSrc": m.HpSource = v; break;
+                    case "mpSrc": m.MpSource = v; break;
+                    case "hpName": m.HpName = v; break;
+                    case "mpName": m.MpName = v; break;
+                    case "items": m.Items = SafeInt(v); break;
+                    case "life": m.Life = SafeUInt(v); break;
+                    case "lifeMax": m.LifeMax = SafeUInt(v); break;
+                    case "mana": m.Mana = SafeUInt(v); break;
+                    case "manaMax": m.ManaMax = SafeUInt(v); break;
+                    case "warn": m.Warn = v; break;
+                }
+            }
+            return m;
+        }
+
+        private static int SafeInt(string s) => int.TryParse(s, out int i) ? i : -1;
+        private static uint SafeUInt(string s) => uint.TryParse(s, out uint i) ? i : 0;
+    }
 }

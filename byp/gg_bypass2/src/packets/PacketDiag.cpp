@@ -100,11 +100,11 @@ void LogLine(const char* fmt, ...)
 void LogHex(const char* tag, const uint8_t* data, int len)
 {
     if (!data || len <= 0 || !g_File) return;
-    char buf[512];
+    char buf[1024];
     int n = snprintf(buf, sizeof(buf), "[%s] len=%d :", tag ? tag : "?", len);
     if (n < 0) return;
     if (n > (int)sizeof(buf) - 8) n = (int)sizeof(buf) - 8;
-    const int show = (len < 64) ? len : 64;
+    const int show = (len < 255) ? len : 255;
     for (int i = 0; i < show && n < (int)sizeof(buf) - 4; i++)
         n += snprintf(buf + n, sizeof(buf) - n, " %02X", data[i]);
     if (n < (int)sizeof(buf) - 4)

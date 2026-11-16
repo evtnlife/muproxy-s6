@@ -18,6 +18,7 @@
 #include "SimpleModulusCipher.h"
 #include "PacketInjector.h"
 #include "PacketDiag.h"
+#include "CommandChannel.h"
 #include "GameMemory/Player.h"
 #include "GameMemory/ClientVitals.h"
 #include "MessageRegistry.h"
@@ -60,6 +61,117 @@ static bool g_mpModelValid = false;
 #define INVENTORY_SLOTS 256
 static int g_slotItemId[INVENTORY_SLOTS];     // -1 = sem item
 static int g_itemListCount = 0;
+
+// ---------------------------------------------------------------------------
+// Potions reconhecidas pelo ID do item.
+//
+// O ID do item é GET_ITEM(grupo,idx) = grupo*512 + idx (MAX_ITEM_TYPE=512).
+// A lista abaixo vem do servidor (eMU `CObjectManager::CharacterUsePotion` +
+// `CItemManager::CGItemUseRecv`) cruzada com a tabela de itens do cliente
+// (Data\Local\Eng\ItemTooltip_eng.txt):
+//
+//   14,0        Apple                    HP
+//   14,1..3     Small/Middle/Large Healing   HP
+//   14,4..6     Small/Middle/Large Mana      MP
+//   14,38..40   Small/Middle/Large Complex   HP + SD
+//   14,70/71    Elite Healing / Mana         HP / MP
+//   13,117..120 "Vitality Potion" (exclusivo deste server)   HP
+//
+// ⚠️ As potions NÃO são adivinhadas: o ID vem da lista de inventário que o
+// servidor manda (F3 10 no login / F3 14 a cada mudança). O nome abaixo é
+// só para a UI mostrar o que está sendo usado.
+// ---------------------------------------------------------------------------
+struct PotionDef {
+    unsigned    id;
+    bool        isHp;
+    const char* name;
+};
+
+static const PotionDef POTIONS[] = {
+    { 7168, true,  "Apple" },                    // 14,0
+    { 7169, true,  "Small Healing Potion" },     // 14,1
+    { 7170, true,  "Healing Potion" },           // 14,2
+    { 7171, true,  "Large Healing Potion" },     // 14,3
+    { 7172, false, "Small Mana Potion" },        // 14,4
+    { 7173, false, "Mana Potion" },              // 14,5
+    { 7174, false, "Large Mana Potion" },        // 14,6
+    { 7206, true,  "Small Complex Potion" },     // 14,38
+    { 7207, true,  "Complex Potion" },           // 14,39
+    { 7208, true,  "Large Complex Potion" },      // 14,40
+    { 7238, true,  "Elite Healing Potion" },     // 14,70
+    { 7239, false, "Elite Mana Potion" },        // 14,71
+    { 6773, true,  "Very Weak Vitality Potion" },   // 13,117
+    { 6774, true,  "Weak Vitality Potion" },         // 13,118
+    { 6775, true,  "Mediocre Vitality Potion" },     // 13,119
+    { 6776, true,  "Excellent Vitality Potion" },    // 13,120
+};
+static const int POTION_COUNT = (int)(sizeof(POTIONS) / sizeof(POTIONS[0]));
+
+static int g_hpSlots[INVENTORY_SLOTS];  static int g_hpSlotCount = 0;
+static int g_mpSlots[INVENTORY_SLOTS];  static int g_mpSlotCount = 0;
+static int g_hpSlotIdx = 0;             // slot de HP em uso (round-robin)
+static int g_mpSlotIdx = 0;
+
+// Verificação do uso automático: se o life/mana não sobe depois do uso, o
+// slot está vazio (ou o servidor recusou) → troca para o próximo slot.
+static bool     g_autoUseValid = false;
+static bool     g_autoUseIsHp = false;
+static int      g_autoUseSlot = -1;
+static unsigned g_autoUseLifeBefore = 0, g_autoUseManaBefore = 0;
+static DWORD    g_autoUseTick = 0;
+
+static const PotionDef* FindPotionDef(unsigned id)
+{
+    for (int i = 0; i < POTION_COUNT; i++) {
+        if (POTIONS[i].id == id) return &POTIONS[i];
+    }
+    return nullptr;
+}
+
+static bool IsHpPotionId(unsigned id)
+{
+    const PotionDef* p = FindPotionDef(id);
+    return p != nullptr && p->isHp;
+}
+
+static bool IsMpPotionId(unsigned id)
+{
+    const PotionDef* p = FindPotionDef(id);
+    return p != nullptr && !p->isHp;
+}
+
+// Nome do item ("Healing Potion", ...) — "" se não for potion.
+static const char* PotionName(unsigned id)
+{
+    const PotionDef* p = FindPotionDef(id);
+    return p ? p->name : "";
+}
+
+// Reconstrói a lista de slots de potion a partir do inventário.
+static void RebuildPotionSlots()
+{
+    g_hpSlotCount = 0;
+    g_mpSlotCount = 0;
+    for (int i = 0; i < INVENTORY_SLOTS; i++) {
+        const int id = g_slotItemId[i];
+        if (id < 0) continue;
+        if (IsHpPotionId((unsigned)id))       g_hpSlots[g_hpSlotCount++] = i;
+        else if (IsMpPotionId((unsigned)id))  g_mpSlots[g_mpSlotCount++] = i;
+    }
+    if (g_hpSlotIdx >= g_hpSlotCount) g_hpSlotIdx = 0;
+    if (g_mpSlotIdx >= g_mpSlotCount) g_mpSlotIdx = 0;
+
+    Logger::Log("POTION", "pocoes no inventario: %d slot(s) de HP (%s), %d de MP (%s)%s",
+                g_hpSlotCount,
+                g_hpSlotCount ? PotionName((unsigned)g_slotItemId[g_hpSlots[0]]) : "-",
+                g_mpSlotCount,
+                g_mpSlotCount ? PotionName((unsigned)g_slotItemId[g_mpSlots[0]]) : "-",
+                (g_hpSlotCount || g_mpSlotCount) ? "" : " (nenhuma — nem no inventario)");
+}
+
+// Slot de HP/MP atualmente em uso (-1 = nenhum).
+static int CurrentHpSlot() { return g_hpSlotCount ? g_hpSlots[g_hpSlotIdx % g_hpSlotCount] : -1; }
+static int CurrentMpSlot() { return g_mpSlotCount ? g_mpSlots[g_mpSlotIdx % g_mpSlotCount] : -1; }
 
 // Uso observado pelo cliente (aguardando o efeito para classificar)
 static bool     g_pendingValid = false;
@@ -245,6 +357,94 @@ static void LogSourcesOnce()
         v.life, v.maxLife, hpPct, v.mana, v.maxMana, mpPct);
 }
 
+// Origem do slot em uso (para a UI).
+enum class SlotSource { None = 0, Manual = 1, Inventory = 2, ItemId = 3, Learned = 4 };
+
+// Resolve o slot da potion e a sua origem.
+//   Manual    → hpslot/mpslot configurado à mão
+//   Inventory → detectado pelo ID do item no inventário (F3 10)
+//   ItemId    → hpitem/mpitem configurado
+//   Learned   → modelo aprendido (fallback do learn & replay)
+static int ResolveSlot(bool isHp, SlotSource* source)
+{
+    int slot = isHp ? g_Config.hpSlot : g_Config.mpSlot;
+    if (slot >= 0) { if (source) *source = SlotSource::Manual; return slot; }
+
+    slot = isHp ? CurrentHpSlot() : CurrentMpSlot();
+    if (slot >= 0) { if (source) *source = SlotSource::Inventory; return slot; }
+
+    const int itemId = isHp ? g_Config.hpItemId : g_Config.mpItemId;
+    if (itemId >= 0) {
+        slot = FindSlotByItemId(itemId);
+        if (slot >= 0) { if (source) *source = SlotSource::ItemId; return slot; }
+    }
+
+    EnterCriticalSection(&g_Lock);
+    const bool learned = isHp ? g_hpModelValid : g_mpModelValid;
+    LeaveCriticalSection(&g_Lock);
+    if (learned) { if (source) *source = SlotSource::Learned; return -1; }
+
+    if (source) *source = SlotSource::None;
+    return -1;
+}
+
+// ============================================================================
+// Estado para a UI (MuProxy2): "POTION_STATE|..." pelo canal de comandos.
+//
+// A UI mostra o slot em uso de HP/MP, a origem dele (inventário/aprendido) e o
+// life/mana atual — para o usuário ver se o módulo está "vendo" o dano e não
+// precisa mexer em nada.
+// ============================================================================
+static void SendStateToUi()
+{
+    SlotSource hpSrc = SlotSource::None, mpSrc = SlotSource::None;
+    const int hpSlot = ResolveSlot(true, &hpSrc);
+    const int mpSlot = ResolveSlot(false, &mpSrc);
+
+    const Vitals v = ReadVitals();
+
+    const char* hpTag = "inv";
+    switch (hpSrc) {
+        case SlotSource::Manual:    hpTag = "cfg"; break;
+        case SlotSource::Inventory: hpTag = "inv"; break;
+        case SlotSource::ItemId:    hpTag = "id";  break;
+        case SlotSource::Learned:   hpTag = "apr"; break;
+        default:                    hpTag = "-";   break;
+    }
+    const char* mpTag = "inv";
+    switch (mpSrc) {
+        case SlotSource::Manual:    mpTag = "cfg"; break;
+        case SlotSource::Inventory: mpTag = "inv"; break;
+        case SlotSource::ItemId:    mpTag = "id";  break;
+        case SlotSource::Learned:   mpTag = "apr"; break;
+        default:                    mpTag = "-";   break;
+    }
+
+    // Nome da potion em uso (vem do ID do item na tabela do inventário).
+    const char* hpName = "";
+    const char* mpName = "";
+    {
+        EnterCriticalSection(&g_Lock);
+        if (hpSlot >= 0 && hpSlot < INVENTORY_SLOTS && g_slotItemId[hpSlot] >= 0)
+            hpName = PotionName((unsigned)g_slotItemId[hpSlot]);
+        if (mpSlot >= 0 && mpSlot < INVENTORY_SLOTS && g_slotItemId[mpSlot] >= 0)
+            mpName = PotionName((unsigned)g_slotItemId[mpSlot]);
+        LeaveCriticalSection(&g_Lock);
+    }
+
+    // Aviso: falta potion do tipo (o auto-potion não tem o que usar).
+    const char* warn = "";
+    if (hpSlot < 0 && mpSlot < 0) warn = "sem potion de HP/MP no inventario";
+    else if (hpSlot < 0) warn = "sem potion de HP";
+    else if (mpSlot < 0) warn = "sem potion de MP";
+
+    CommandChannel::SendFormat(
+    "POTION_STATE|active=%d|hp=%d|hpSrc=%s|hpName=%s|mp=%d|mpSrc=%s|mpName=%s|items=%d|"
+    "life=%u|lifeMax=%u|mana=%u|manaMax=%u|warn=%s",
+    IsRunning() ? 1 : 0, hpSlot, hpTag, hpName, mpSlot, mpTag, mpName, g_itemListCount,
+    v.life, v.maxLife, v.mana, v.maxMana, warn);
+}
+
 // ============================================================================
 // Monta o pacote de uso de item (6 bytes, plaintext).
 //   isHp = true  → potion de HP
@@ -253,17 +453,12 @@ static void LogSourcesOnce()
 // ============================================================================
 static bool BuildItemUsePacket(bool isHp, uint8_t* outPacket)
 {
-    int slot = isHp ? g_Config.hpSlot : g_Config.mpSlot;
+    SlotSource source = SlotSource::None;
+    const int slot = ResolveSlot(isHp, &source);
 
-    // Sem slot manual: resolve pelo ID do item (tabela montada com o pacote
-    // de inventário F3 10 que o servidor manda no login).
-    if (slot < 0) {
-        int itemId = isHp ? g_Config.hpItemId : g_Config.mpItemId;
-        if (itemId >= 0) slot = FindSlotByItemId(itemId);
-    }
-
-    // Slot configurado à mão: monta o pacote (TargetSlot 0x00 e type 0 — é o que
-    // o jogo envia, captura 18:51:47: C1 06 26 <slot> 00 00).
+    // Slot resolvido (manual / inventário / ID de item): monta o pacote
+    // (TargetSlot 0x00 e type 0 — é o que o jogo envia, captura 18:51:47:
+    // C1 06 26 <slot> 00 00).
     if (slot >= 0) {
         outPacket[0] = (uint8_t)MuOpcodes::HeaderType::C1;
         outPacket[1] = MuOpcodes::Size::ItemUse;
@@ -317,9 +512,64 @@ static bool UsePotion(bool isHp, int percent)
 
     g_lastUseTick = now;
     g_lastBlock = BlockReason::None;
+
+    // Marca o uso para verificação: se o life/mana não subir, o slot não
+    // serviu (potion acabou / servidor recusou) → troca de slot.
+    {
+        const Vitals v = ReadVitals();
+        g_autoUseValid = true;
+        g_autoUseIsHp = isHp;
+        g_autoUseSlot = packet[3];
+        g_autoUseLifeBefore = v.life;
+        g_autoUseManaBefore = v.mana;
+        g_autoUseTick = now;
+    }
+
     Logger::Log("POTION", "%s disparada em %d%% (slot=%u) — uso injetado",
                 isHp ? "potion de HP" : "potion de MP", percent, packet[3]);
     return true;
+}
+
+// ============================================================================
+// Verificação do uso automático + troca de slot.
+//
+// Se a potion não produziu efeito (life/mana não subiu), o slot provavelmente
+// está vazio (a potion acabou) ou o servidor recusou o uso. Nesses casos o
+// byp passa para o próximo slot do mesmo tipo — sem depender do jogador.
+// ============================================================================
+static void VerifyAutoUse()
+{
+    if (!g_autoUseValid) return;
+
+    const DWORD now = GetTickCount();
+    if (now - g_autoUseTick < 900) return;   // espera o efeito chegar
+
+    const Vitals v = ReadVitals();
+    const bool worked = g_autoUseIsHp
+        ? (v.haveLife && v.life >= g_autoUseLifeBefore + 3)
+        : (v.haveMana && v.mana >= g_autoUseManaBefore + 3);
+
+    const int oldSlot = g_autoUseSlot;
+    const bool wasHp = g_autoUseIsHp;
+    g_autoUseValid = false;
+
+    if (worked) return;
+
+    // O slot não serviu → próximo slot do mesmo tipo.
+    int* list = wasHp ? g_hpSlots : g_mpSlots;
+    int* count = wasHp ? &g_hpSlotCount : &g_mpSlotCount;
+    int* idx = wasHp ? &g_hpSlotIdx : &g_mpSlotIdx;
+
+    if (*count <= 1) {
+        Logger::Log("POTION", "potion de %s no slot %d nao teve efeito e nao ha outro slot de %s "
+                              "— reponha as potions ou configure h%slot/m%slot",
+                    wasHp ? "HP" : "MP", oldSlot, wasHp ? "HP" : "MP");
+        return;
+    }
+
+    *idx = (*idx + 1) % *count;
+    Logger::Log("POTION", "potion de %s no slot %d nao teve efeito → usando slot %d",
+                wasHp ? "HP" : "MP", oldSlot, list[*idx]);
 }
 
 // ============================================================================
@@ -494,8 +744,21 @@ static DWORD WINAPI WatcherThread(LPVOID)
     while (InterlockedCompareExchange(&g_Running, 1, 1) == 1) {
         if (InterlockedCompareExchange(&g_Active, 1, 1) == 1) {
             ResolvePendingModel();
+            VerifyAutoUse();
             CheckThresholds();
         }
+
+        // Estado para a UI (a cada ~1s) — mostra slot em uso, life/mana e
+        // o aviso quando falta potion.
+        {
+            static DWORD lastState = 0;
+            const DWORD now = GetTickCount();
+            if (lastState == 0 || now - lastState >= 1000) {
+                lastState = now;
+                SendStateToUi();
+            }
+        }
+
         Sleep(TICK_MS);
     }
 
@@ -559,24 +822,23 @@ static void HandlePotionConfig(const char* payload)
 }
 REGISTER_MESSAGE(POTION_CONFIG, HandlePotionConfig);
 
-// POTION_APPLY — o botão "Aplicar" da UI: UMA mensagem que aplica a
-// configuração E arma o módulo (idempotente). Evita a dances de
-// STOP -> CONFIG -> START, que deixava o módulo meio-morto na UI.
+// POTION_APPLY — UMA mensagem que aplica a configuração E arma o módulo
+// (idempotente). A UI manda isso a cada mudança (checkbox/limiar/intervalo)
+// e quando o byp.dll reconecta (o módulo volta do zero com o jogo).
 static void HandlePotionApply(const char* payload)
 {
-    // Debounce: segurar a tecla do botão dispara o Click várias vezes por
-    // segundo (o repeat de teclado do Windows). A configuração é a mesma,
-    // então o repetido é ignorado.
-    static DWORD lastApply = 0;
-    const DWORD now = GetTickCount();
-    if (lastApply != 0 && now - lastApply < 1000) return;
-    lastApply = now;
-
+    // ⚠️ Nenhuma mensagem é descartada aqui: a UI já tem debounce (400 ms) e
+    // o "debounce" antigo (1 s) chegou a engolir uma configuração legítima
+    // (usuário mexendo no limiar 2x em 1s) — a UI ficava mostrando um valor
+    // e o módulo usava outro.
     ApplyConfigPayload(payload);
-    InterlockedExchange(&g_Active, 1);
-    Logger::Log("POTION", "auto-potion LIGADO (hp<%d%% mp<%d%% intervalo=%dms)",
-                g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs);
-    LogStatus();
+
+    const LONG wasActive = InterlockedExchange(&g_Active, 1);
+    if (wasActive == 0) {
+        Logger::Log("POTION", "auto-potion LIGADO (hp<%d%% mp<%d%% intervalo=%dms)",
+                    g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs);
+        LogStatus();
+    }
 }
 REGISTER_MESSAGE(POTION_APPLY, HandlePotionApply);
 
@@ -657,16 +919,21 @@ void SetConfig(const Settings& cfg)
 // O ID do item é montado a partir do ItemInfo (CItemManager::ItemByteConvert):
 //   byte0            → índice bits 0..7
 //   byte3 bit 1      → índice bit 8
-//   byte5 bits 3..6  → índice bits 9..12 (o "grupo" = índice >> 9)
+//   byte5 bits 4..7  → índice bits 9..12 (o "grupo" = índice >> 9)
 //
 // ⚠️ O servidor usa GET_ITEM(grupo,idx) = grupo*512 + idx (MAX_ITEM_TYPE=512),
 // então os bits do grupo ficam em 9..12 — não em 8..11.
+// ⚠️ E o grupo é o NIBBLE ALTO do byte5: o servidor grava
+// `lpMsg[5] |= (m_Index & GET_ITEM(15,0)) >> 5` (CItemManager::ItemByteConvert),
+// ou seja, os bits 9..12 do índice caem nos bits 4..7 do byte5. Ler os bits
+// 3..6 (o erro antigo) devolvia o grupo pela metade: o "Scroll of Twister"
+// virava "Siege Potion" e as potions de verdade passavam despercebidas.
 // ============================================================================
 static unsigned DecodeItemId(const uint8_t* info)
 {
     unsigned id = info[0];
-    id |= (unsigned)((info[3] & 0x02) << 7);      // índice bit 8
-    id |= (unsigned)(((info[5] >> 3) & 0x0F) << 9); // índice bits 9..12
+    id |= (unsigned)((info[3] & 0x02) << 7);          // índice bit 8
+    id |= (unsigned)(((info[5] >> 4) & 0x0F) << 9);   // índice bits 9..12 (grupo)
     return id;
 }
 
@@ -674,14 +941,26 @@ static unsigned DecodeItemId(const uint8_t* info)
 // Observação do servidor: um único ponto de entrada para os pacotes S→C.
 // ============================================================================
 
-// Decodifica (de forma silenciosa) o corpo cifrado de um pacote C3.
+// ============================================================================
+// Decodifica (de forma silenciosa) o corpo cifrado de um pacote C3/C4.
 // O servidor usa SimpleModulus nos pacotes C3/C4 (SocketManager::DataSend).
-static bool TryDecodeSmBody(const uint8_t* data, int len, uint8_t* out, int outCap, int* outLen)
+//
+// O envelope no wire:
+//   C3 → [C3][size:1][SM cifrado]              (header de 2 bytes)
+//   C4 → [C4][sizeHi][sizeLo][SM cifrado]       (header de 3 bytes)
+//
+// O corpo decifrado começa com o byte do serial; depois vem o conteúdo do
+// pacote interno (no servidor: o header PSBMSG_HEAD, ex.: [sizeHi][sizeLo]
+// [0xF3][0x10] e o payload).
+// ============================================================================
+static bool TryDecodeSmBody(const uint8_t* data, int len, int hdrSize,
+                             uint8_t* out, int outCap, int* outLen)
 {
-    if (!data || len < 2 + SM_ENCRYPTED_SIZE) return false;
-    if (data[0] != (uint8_t)MuOpcodes::HeaderType::C3) return false;
+    if (!data || len < hdrSize + SM_ENCRYPTED_SIZE) return false;
+    if (data[0] != (uint8_t)MuOpcodes::HeaderType::C3 &&
+        data[0] != (uint8_t)MuOpcodes::HeaderType::C4) return false;
 
-    const int smLen = len - 2;
+    const int smLen = len - hdrSize;
     if (smLen < SM_ENCRYPTED_SIZE) return false;
 
     // Cada bloco de 11 bytes vira 8 bytes: o Decrypt escreve (smLen/11)*8.
@@ -689,11 +968,11 @@ static bool TryDecodeSmBody(const uint8_t* data, int len, uint8_t* out, int outC
     if ((smLen / SM_ENCRYPTED_SIZE) * SM_BLOCK_SIZE > outCap) return false;
 
     SimpleModulusCipher::SetVerbose(false);
-    int decLen = SimpleModulusCipher::Decrypt(out, data + 2, smLen);
+    int decLen = SimpleModulusCipher::Decrypt(out, data + hdrSize, smLen);
     if (decLen <= 0) {
-        // O SERVIDOR cifra os C3 com a chave de RECEPÇÃO (Obj2 do cliente) —
+        // O SERVIDOR cifra os C3/C4 com a chave de RECEPÇÃO (Obj2 do cliente) —
         // com a chave de envio o checksum do SimpleModulus falha.
-        decLen = SimpleModulusCipher::DecryptReceive(out, data + 2, smLen);
+        decLen = SimpleModulusCipher::DecryptReceive(out, data + hdrSize, smLen);
     }
     SimpleModulusCipher::SetVerbose(true);
 
@@ -808,9 +1087,63 @@ static void ParseItemList(const uint8_t* p, int len)
             EnterCriticalSection(&g_Lock);
             g_slotItemId[slot] = (int)id;
             LeaveCriticalSection(&g_Lock);
-            Logger::Log("POTION", "  slot=%d item=0x%04X", slot, id);
+            Logger::Log("POTION", "  slot=%d item=0x%04X (grupo %u, idx %u)%s%s",
+                        slot, id, id / 512u, id % 512u,
+                        PotionName(id)[0] ? " " : "", PotionName(id));
         }
     }
+
+    // Descobre automaticamente os slots de potion (HP/MP) pelo ID do item.
+    RebuildPotionSlots();
+}
+
+// ============================================================================
+// F3 14 — item modificado (PMSG_ITEM_MODIFY_SEND).
+//   payload: slot(1) + ItemInfo(12)
+// O servidor manda isso a cada mudança no inventário (pegar/gastar/mover item)
+// — é aqui que o módulo descobre uma potion nova sem esperar o próximo login.
+// ============================================================================
+static void ParseItemModify(const uint8_t* p, int len)
+{
+    if (len < 13) return;
+
+    const int slot = p[0];
+    if (slot < 0 || slot >= INVENTORY_SLOTS) return;
+
+    const unsigned id = DecodeItemId(p + 1);
+
+    EnterCriticalSection(&g_Lock);
+    g_slotItemId[slot] = (int)id;
+    LeaveCriticalSection(&g_Lock);
+
+    Logger::Log("POTION", "item modificado (F3 14): slot=%d item=0x%04X (grupo %u, idx %u)%s%s",
+                slot, id, id / 512u, id % 512u,
+                PotionName(id)[0] ? " " : "", PotionName(id));
+
+    RebuildPotionSlots();
+}
+
+// ============================================================================
+// C1 28 — item removido do inventário (PMSG_ITEM_DELETE_SEND).
+//   payload: slot(1) + flag(1)
+// É o que acontece quando a potion é gasta: o slot tem de sair da tabela,
+// senão o módulo fica usando um slot vazio.
+// ============================================================================
+static void ParseItemDelete(const uint8_t* p, int len)
+{
+    if (len < 2) return;
+
+    const int slot = p[0];
+    if (slot < 0 || slot >= INVENTORY_SLOTS) return;
+
+    EnterCriticalSection(&g_Lock);
+    const int old = g_slotItemId[slot];
+    g_slotItemId[slot] = -1;
+    LeaveCriticalSection(&g_Lock);
+
+    Logger::Log("POTION", "item removido (C1 28): slot=%d (era 0x%04X)", slot, old);
+
+    RebuildPotionSlots();
 }
 
 void OnServerPacket(const uint8_t* data, int len)
@@ -820,25 +1153,37 @@ void OnServerPacket(const uint8_t* data, int len)
     const uint8_t* buf = data;
     int bufLen = len;
 
-    // Pacote C3: o corpo vem cifrado (SimpleModulus) → decodifica.
-    uint8_t decoded[512];
+    // Pacote C3/C4: o corpo vem cifrado (SimpleModulus) → decodifica.
+    //   C3 → header de 2 bytes   C4 → header de 3 bytes
+    //
+    // O C4 do login tem ~784 bytes (lista de itens + equipamento) → decifra
+    // (781/11)*8 = 568 bytes. O buffer precisa comportar isso.
+    uint8_t decoded[2048];
     int decLen = 0;
-    if (data[0] == (uint8_t)MuOpcodes::HeaderType::C3) {
-        if (TryDecodeSmBody(data, len, decoded, (int)sizeof(decoded), &decLen)) {
-            buf = decoded;
-            bufLen = decLen;
+    if (data[0] == (uint8_t)MuOpcodes::HeaderType::C3 ||
+        data[0] == (uint8_t)MuOpcodes::HeaderType::C4) {
+        const int hdrSize = (data[0] == (uint8_t)MuOpcodes::HeaderType::C3) ? 2 : 3;
+        if (TryDecodeSmBody(data, len, hdrSize, decoded, (int)sizeof(decoded), &decLen)) {
+            // O corpo decifrado começa com o byte do serial; o conteúdo do
+            // pacote interno vem depois (no servidor: o header PSBMSG_HEAD,
+            // ex.: [sizeHi][sizeLo][0xF3][0x10] + payload).
+            buf = decoded + 1;
+            bufLen = decLen - 1;
             static int decLogged = 0;
             if (decLogged < 40) {
                 decLogged++;
-                PacketDiag::LogHex("C3-SM decodificado", decoded, decLen);
+                PacketDiag::LogHex((data[0] == (uint8_t)MuOpcodes::HeaderType::C3)
+                                       ? "C3-SM decodificado" : "C4-SM decodificado",
+                                   decoded, decLen);
             }
         }
         else {
             static int failCount = 0;
             if (failCount < 5) {
                 failCount++;
-                Logger::Log("POTION", "C3 do servidor (len=%d) nao decodificou (SimpleModulus) "
-                                      "— o corpo fica cifrado", len);
+                Logger::Log("POTION", "%s do servidor (len=%d) nao decodificou (SimpleModulus) "
+                                      "— o corpo fica cifrado",
+                            data[0] == (uint8_t)MuOpcodes::HeaderType::C3 ? "C3" : "C4", len);
             }
             bufLen = 0;   // não dá para ler o payload
         }
@@ -859,6 +1204,8 @@ void OnServerPacket(const uint8_t* data, int len)
             ParseCharacterCalc(buf + i + 2, bufLen - i - 2);
         else if (sub == (uint8_t)MuOpcodes::F3Sub::ItemList)
             ParseItemList(buf + i + 2, bufLen - i - 2);
+        else if (sub == (uint8_t)MuOpcodes::F3Sub::ItemModify)
+            ParseItemModify(buf + i + 2, bufLen - i - 2);
     }
 
     // Life/mana (C1 26 / C1 27) — payload cru (o servidor NÃO usa Camada-2
@@ -868,6 +1215,8 @@ void OnServerPacket(const uint8_t* data, int len)
             OnLifeUpdatePacket(data, len);
         else if (data[2] == (uint8_t)MuOpcodes::ServerToClient::ManaUpdate)
             OnManaUpdatePacket(data, len);
+        else if (data[2] == 0x28)   // PMSG_ITEM_DELETE_SEND (item removido)
+            ParseItemDelete(buf + 1, bufLen - 1);
     }
 }
 
@@ -904,7 +1253,9 @@ void OnItemListPacket(const uint8_t* data, int len)
             EnterCriticalSection(&g_Lock);
             g_slotItemId[slot] = (int)id;
             LeaveCriticalSection(&g_Lock);
-            Logger::Log("POTION", "  slot=%d item=0x%04X", slot, id);
+            Logger::Log("POTION", "  slot=%d item=0x%04X (grupo %u, idx %u)%s%s",
+                        slot, id, id / 512u, id % 512u,
+                        PotionName(id)[0] ? " " : "", PotionName(id));
         }
     }
 }
@@ -971,6 +1322,9 @@ void LogStatus()
                 g_Config.hpThreshold, g_Config.mpThreshold, g_Config.intervalMs,
                 hpValid ? "ok" : "-", hpSlot, mpValid ? "ok" : "-", mpSlot,
                 life, maxLife, hpPct, mana, maxMana, mpPct);
+
+    Logger::Log("POTION", "  slots automaticos: HP=%d (de %d) MP=%d (de %d) | inventario=%d item(ns)",
+                CurrentHpSlot(), g_hpSlotCount, CurrentMpSlot(), g_mpSlotCount, g_itemListCount);
 
     if (g_Config.hpSlot >= 0) Logger::Log("POTION", "  slot manual de HP: %d", g_Config.hpSlot);
     if (g_Config.mpSlot >= 0) Logger::Log("POTION", "  slot manual de MP: %d", g_Config.mpSlot);

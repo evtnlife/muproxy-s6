@@ -95,6 +95,7 @@ namespace F3Sub {
     enum : u8 {
         CharacterList = 0x00,
         ItemList      = 0x10,
+        ItemModify    = 0x14,   // item modificado (slot + ItemInfo) — o inventário muda
         SkillList     = 0x11,
         Equipment     = 0x13,
         Name          = 0x15,
