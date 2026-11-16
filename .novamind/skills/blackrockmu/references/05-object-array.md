@@ -70,4 +70,9 @@ object[i]   = array_base + i * 0x598      (MAX_OBJECTS = 400, OBJECT_SIZE = 0x59
 
 ## Slot index
 - The **slot index is NOT derivable** from the entity index via `& 0x3FF` — you must scan the
-  array (`GameMemory::FindObjectByEntityIndex`).
+  array (`GameMemory::Object::FindByEntityIndex`).
+- `GameMemory` was split into three namespaces, one file each (§12):
+  `GameMemory::Globals` (bases/globals), `GameMemory::Object` (array, `ByIndex`, `FindByEntityIndex`,
+  `Type/IsLive/X/Y/Z/CompositeIndex/Id/Name`, `ToAttackId`), `GameMemory::Player` (local player).
+- `GameMemory::Object::ToAttackId(entityIndex)` = `entityIndex ^ 0xEFF5` — it still exists but has
+  **no caller**: neither opcode applies the XOR today (§4).

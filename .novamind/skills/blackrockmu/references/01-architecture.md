@@ -31,17 +31,37 @@ MuProxy2.exe (C# .NET 8 WinForms)
 
 ## Injection socket (key detail)
 - byp.dll does **not** open its own connection to the game server. It reuses the **game's own
-  authenticated TCP socket** to the GS (`g_GameServerSocket` in `PacketSniffer.cpp`). That socket
-  is already connected to `MuProxy2 → relay → real GS`. `InjectC1Attack` / `InjectToServer` write
-  straight onto it via `TrueSend`, so the server sees the packet from the same authenticated session.
+  authenticated TCP socket** to the GS (`GameServerConnection` owns it —
+  `packets/GameServerConnection.cpp`). That socket is already connected to
+  `MuProxy2 → relay → real GS`. `PacketInjector` ciphers the bytes and
+  `GameServerConnection::SendToGameServer` writes them straight onto it via the
+  **original** `send` trampoline (`OriginalApi::GetSend()`), so the server sees the packet from
+  the same authenticated session.
 
-## byp.dll modules
-- **PacketSniffer**: ws2_32 hooks, Layer-1 + XorData crypto, injection, PKT channel (44413).
-- **AttackModule**: auto-attack loop (Watcher / Dispatcher / AttackSingleMob threads),
-  `BuildAttackPacket`, `SendSkillAttack`.
-- **MonsterTracker**: scans the object array, reports `ENTITY` via 44412.
-- **GameMemory / GameAddresses / GameObject**: object-array access + offsets.
-- **SimpleModulusCipher**: C3 cipher (skill attacks).
-- **SkillMap**: parses the F3 skill list.
-- **PsBypass / PsPacketHook / MainPatcher / StartupHook / DllNotifyHook / VPTracer**:
-  PS.dll (Themida/WinLicense) neutralization + Main.dll patches.
+## byp.dll modules (post-refactor — see §12 for the full map)
+The source is split per domain under `src/` (`core/`, `crypto/`, `net/`, `packets/`, `game/`,
+`attack/`, `debug/`); headers all live in `src/include/`.
+
+- **`packets/PacketSniffer`**: orchestrator only — installs the hooks, opens the channels, wires
+  the observers.
+- **`net/winsock/WinsockHooks`**: the ws2_32 hooks (send/recv/WSASend/WSARecv/connect) + the
+  observer callbacks the sniffer consumes.
+- **`crypto/MuCipher`**: Layer-1 (XOR+sub) and Layer-2 (`XorData`) — the only XOR port.
+- **`crypto/SimpleModulusCipher`**: SM cipher (skill attacks). **`crypto/C3Decoder`**: C3/C4 log decoding.
+- **`packets/PacketInjector`**: the single injection port (§4).
+- **`packets/GameServerConnection`**: owns the GS socket + port detection (C116) and is the transport.
+- **`packets/PacketReassembler`** (reassembly via callback), **`packets/NameRewriter`**
+  (create-char encoding — **dormant**, no call-site).
+- **`net/CommandChannel`** (44412), **`net/PacketChannel`** (44413), **`net/MessageRegistry`**
+  (typed `TAG|payload` registry), **`net/PacketHandler`**.
+- **`attack/AttackModule`**: auto-attack loop (Watcher / Dispatcher threads),
+  `BuildAttackPacket`, `SendAttack`, `SendSkillAttack`.
+- **`debug/DebugTools` + `debug/DebugScans`**: RE tools (dump/hexdump/scan) — log tag stays `ATTACK`.
+- **`game/MonsterTracker`**: scans the object array, reports `ENTITY` via 44412.
+- **`game/GameMemory/{Globals,Object,Player}`**: object-array access + offsets + local player.
+- **`game/{ViewportMap,SkillMap,SkillHook}`**: viewport map, F3 skill list, skill-builder hooks.
+- **`core/{dllmain,Logger,InlineHook,OriginalApi,StackTrace}`**: entry point, log, hook helper,
+  ws2_32 trampolines, stack-trace walker.
+
+> The old `PsBypass / PsPacketHook / MainPatcher / StartupHook / DllNotifyHook / VPTracer`
+> modules **no longer exist** in the source tree — do not look for them.

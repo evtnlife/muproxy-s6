@@ -8,7 +8,8 @@ decrypt: plain[i] = (wire[i] ^ 0x36) - 0x07
 encrypt: wire[i]  = (plain[i] + 0x07) ^ 0x36
 ```
 - Keys: `Main.dll+0x403F75` (sub = `0x07`), `Main.dll+0x403F76` (xor = `0x36`).
-- byp.dll fns: `GameServerDecryptLayer1` / `GameServerEncryptLayer1` (PacketSniffer.cpp).
+- byp.dll fns: `MuCipher::EncryptLayer1` / `MuCipher::DecryptLayer1` / `MuCipher::FullEncrypt` /
+  `MuCipher::FullDecrypt` (`crypto/MuCipher.cpp`).
 
 ## Camada-2 / XorData (chained XOR, on the DATA bytes `[3, len)` of C1 packets)
 ```
@@ -24,7 +25,8 @@ AB 11 CD FE 18 23 C5 A3  CA 33 C1 CC 66 67 21 F3
   decrypted one.
 - ⚠️ Older docs claimed "BlackRock doesn't use XorFilter" — that was **WRONG**. It IS applied to
   attack data bytes.
-- byp.dll fn: `GameServerXorData(data, start, end)`.
+- byp.dll fn: `MuCipher::XorData(data, start, end)` (`crypto/MuCipher.cpp`) — the **only** place
+  in the project that applies Camada-2.
 
 ## Full chain for a C1 attack
 ```
@@ -32,10 +34,10 @@ TRUE plaintext  →  XorData [3,len)  →  Layer-1  →  WIRE
 ```
 
 ## Decryption gotcha (display vs real plaintext)
-- `GameServerFullDecrypt` only does Layer-1 (used for the log display). That returns the
+- `MuCipher::FullDecrypt` only does Layer-1 (used for the log display). That returns the
   **XorData form** (e.g. `C1 07 11 EF ED B6 77`), NOT the real plaintext
   (`C1 07 11 00 1A 78 04`).
-- To get the real plaintext: Layer-1 decrypt, THEN apply `GameServerXorData` over `[3, len)`
+- To get the real plaintext: Layer-1 decrypt, THEN apply `MuCipher::XorData` over `[3, len)`
   (it is its own inverse).
 
 ## BlackRock does NOT use C1C2 XOR
@@ -47,7 +49,7 @@ TRUE plaintext  →  XorData [3,len)  →  Layer-1  →  WIRE
 
 ## C3 / SimpleModulus (skill attacks)
 - C3 packets use a modulus-based cipher (SimpleModulus). byp.dll implements it in
-  `SimpleModulusCipher.cpp`.
+  `crypto/SimpleModulusCipher.cpp` (log decoding of C3/C4 payloads in `crypto/C3Decoder.cpp`).
 - SM object: `main.exe+0x8397778` (RVA), abs `0x08797778` (confirmed via x64dbg at `0x404E73`).
   72 bytes:
 

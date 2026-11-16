@@ -20,30 +20,55 @@ C1 07 11 00 1A 78 04  → XorData [3,7) →  C1 07 11 EF ED B6 77  → Layer-1 �
 ## Injection paths (must NOT share the XorData step or you double-encrypt)
 | Caller | Input form | Function | Layers applied |
 |--------|-----------|----------|----------------|
-| `SendAttack` → `BuildAttackPacket` | TRUE plaintext `C1 07 11 00 1A 78 04` | `InjectC1Attack` | XorData `[3,len)` **then** Layer-1 |
-| `HandleSendPacket` (user hex) | XorData form `C1 07 11 ED 1F 44 86` | `InjectToServer` | Layer-1 only |
+| `SendAttack` → `BuildAttackPacket` | TRUE plaintext `C1 07 11 00 1A 78 04` | `PacketInjector::Inject` | XorData `[3,len)` **then** Layer-1 |
+| `SendSkillAttack` | TRUE plaintext `C1 07 19 00 3C 02 77` | `PacketInjector::Inject` | XorData `[3,len)` → SM → `C3 0D [11]` → Layer-1 |
+| `HandleSendPacket` (user hex) | XorData form `C1 07 11 ED 1F 44 86` | `PacketInjector::InjectXorData` | Layer-1 only |
 
-- `InjectC1Attack` (PacketSniffer.cpp) validates header `C1` + opcode `0x11`, applies
-  `GameServerXorData(3, len)`, then delegates to `InjectToServer` (Layer-1 + `TrueSend` on the
-  game's GS socket).
-- The `0xEFF5` XOR convention belongs to **skill 0x19**, NOT normal attack 0x11.
+- `PacketInjector::Inject` (`packets/PacketInjector.cpp`) is the **only** injection entry: it
+  validates `C1` + opcode (`0x11` or `0x19`, 7 bytes), applies `MuCipher::XorData(buf, 3, len)`
+  **exactly once**, picks the pipeline by opcode and hands the ciphered bytes to
+  `GameServerConnection::SendToGameServer` (the socket owner).
+- **Never** call `MuCipher::XorData` yourself before `Inject` — Camada-2 would be applied twice.
+- The `0xEFF5` XOR is **not applied to any opcode** today (the helper
+  `GameMemory::Object::ToAttackId()` still exists but has no caller). Both 0x11 and 0x19 send the
+  **raw** entity index.
 
 ## Skill attack 0x19 (TARGETED_SKILL — implemented)
-- Server format (GAMESERVER_UPDATE>=701, `SkillManager.h` `PMSG_SKILL_ATTACK_RECV`):
+> ⚠️ **This section was rewritten on 2026-11-15.** The older text of this skill (interleaved
+> index/skill, `^0xEFF5`, a direction byte, "skill wire 0xE7C3") was a **misread** of the
+> capture. Sources: `byp/docs/skill_c1_07_19_fix/` and `byp/docs/stack_c1_07_19/`.
+
+- Plaintext (7 bytes) — **skill first, raw index, no direction byte**:
   ```
-  C1 07 19 [indexH] [skillH] [indexL] [skillL]
+  C1 07 19 [skillH] [skillL] [indexH] [indexL]
   ```
-  - Bytes are **interleaved**: index and skill alternate H/L.
-  - Server reads: `bIndex = MAKE_NUMBERW(indexH,indexL)`, `skill = MAKE_NUMBERW(skillH,skillL)`.
-  - `index` (target) = **entityIndex ^ 0xEFF5** (the value the game stores at global `0x081C03A4`).
-  - `skill` = full 2-byte skill number (e.g. `0x01E7` = Inferno).
-- The MuProxy2 UI "Atk ID" column = `entityIndex ^ 0xEFF5` (e.g. a monster shown as `EBEB` is
-  entity `0xEBEB ^ 0xEFF5 = 0x0218`). So the packet must send the **XOR'd** value (`0xEBEB`), not
-  the raw entity (`0x0218`).
-- Skill direction is **0..255** (different from normal attack 0..7):
-  `direction = ROUND(angleDeg / 360 * 256) & 0xFF`.
-- byp.dll flow: `AttackModule::SendSkillAttack` builds the 7-byte `C1 0x19` plaintext →
-  `EnqueueSkillPacket(SKILL_TYPE_MANUAL)` → `HookSend` on the game thread SM-encrypts it (8→11) →
-  wraps `C3` (`C3 0D <11 bytes>`) → `InjectToServer` (Layer-1 + send).
-- Evidence (real game packet): `C1 07 19 E7 C3 E2 CF` → skill=`0xE7C3`, target=`0xE2CF`
-  (`0xE2CF ^ 0xEFF5 = 0x0D3A` entity).
+  - `skill` = 2-byte skill number = the F3 11 `SkillNumber` shown in the MuProxy2 combo
+    (e.g. `0x003C` = 60 = Force do DL).
+  - `index` = **raw** entity index (`OFF_INDEX`, 0x07E) — **no `0xEFF5`**.
+  - No direction byte: the client sends 1 byte less than the server struct
+    (`CGSkillAttackRecv` reads skill + index only).
+- Pipeline (**only 0x19** — the 0x11 stays plain C1):
+  ```
+  C1 07 19 [skillH][skillL][indexH][indexL]
+    → XorData [3,7)        → C1 07 19 E7 C3 E2 50   (form seen in the capture)
+    → SM input = [serial @0x08793700] + payload XorData'd (6 bytes)
+    → SimpleModulus 6→11   → C3 0D [11 bytes]
+    → Layer-1               → wire
+  ```
+- The captured `C1 07 19 E7 C3 E2 50` is the **XorData form, before the SM** — not the wire.
+  Decoding it with the XorFilter gives `C1 07 19 00 3C 02 77` (skill 60 = Force, index 0x0277).
+  The old "skill wire 0xE7C3" was exactly this misread.
+- byp.dll flow: `AttackModule::SendSkillAttack` builds the 7-byte plaintext and calls
+  `PacketInjector::Inject(plain, 7)` **directly** — the old queue
+  (`EnqueueSkillPacket(SKILL_TYPE_MANUAL)`) was **removed** (Fase 0 of the refactor).
+- Log lines to check in the field:
+  `SkillAttack: plain=[C1 07 19 00 3C .. ..] -> PacketInjector::Inject`,
+  `InjectSkillC1: after XorData [...]`, `InjectSkillC1: sent C3 0D (13 bytes) skill=0x.. index=0x..`.
+
+### Open question — how many bytes go into the SM
+- Our implementation feeds **6 bytes** to SimpleModulus (`[serial] + 5 payload bytes`).
+- The stack RE of the client's own send (`main.exe+0x4DB0`, see
+  `byp/docs/stack_c1_07_19/03_send_encrypt_0x404DB0.md`) shows the client overwrites `data[3]`
+  with the **serial** and SM-encrypts only **4 bytes** (`data[3..6]`).
+- Not reconciled yet — needs a live breakpoint at `0x404E34` to see what the server really
+  expects. Until then, treat our 6-byte variant as *unconfirmed in the field*.
