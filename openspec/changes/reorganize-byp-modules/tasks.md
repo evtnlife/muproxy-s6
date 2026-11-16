@@ -5,15 +5,15 @@
 
 ## 1. Fase 0 — Limpeza de código morto e comentários
 
-- [ ] 1.1 Apagar a família PS.dll (`PsBypass`, `DllNotifyHook`, `MainPatcher`,
+- [x] 1.1 Apagar a família PS.dll (`PsBypass`, `DllNotifyHook`, `MainPatcher`,
   `PsPacketHook`, `StartupHook`, `AsyncScanner`, `VPTracer` — .cpp + .h) e verificar que
   `build.bat` ainda compila (nenhum estava em `SOURCES`) e que não há `#include` restante.
-- [ ] 1.2 Apagar o rascunho `src/PacketSniffer.cpp.new` e verificar que nenhuma referência
+- [x] 1.2 Apagar o rascunho `src/PacketSniffer.cpp.new` e verificar que nenhuma referência
   a `.cpp.new` existe no build ou nos scripts.
 - [ ] 1.3 Remover a fila de skill legado (`EnqueueSkillPacket`, `ProcessSkillQueue`,
   struct `SkillPacketEntry`, enum `SKILL_TYPE_*` de `PacketSniffer.h`) e verificar que o
   build passa e o skill continua indo por `InjectSkillC1` (teste em campo: cast de Force).
-- [ ] 1.4 Corrigir comentários obsoletos (ex.: `AttackModule.h` linha ~34 "0xEFF5 ...
+- [x] 1.4 Corrigir comentários obsoletos (ex.: `AttackModule.h` linha ~34 "0xEFF5 ...
   ataques normais E skill") e verificar por busca que não resta menção a 0xEFF5 aplicado
   a skill 0x19.
 - [ ] 1.5 Commit da Fase 0 e smoke test em campo (jogo abre, log sem erro, ataque normal
@@ -21,12 +21,12 @@
 
 ## 2. Fase 1 — Extrair `MuCipher` (criptografia única)
 
-- [ ] 2.1 Criar `src/MuCipher.h` + `src/MuCipher.cpp` com `XorData`, `EncryptLayer1`/
+- [x] 2.1 Criar `src/MuCipher.h` + `src/MuCipher.cpp` com `XorData`, `EncryptLayer1`/
   `DecryptLayer1`, `FullEncrypt`/`FullDecrypt`, `GetGameServerKeys`, `GetMuHeaderSize` e
   a tabela `g_XorFilter`; verificar que o arquivo compila isolado.
-- [ ] 2.2 Adicionar `src/MuCipher.cpp` à `SOURCES` do `build.bat` e verificar que o build
+- [x] 2.2 Adicionar `src/MuCipher.cpp` à `SOURCES` do `build.bat` e verificar que o build
   gera `byp.dll`.
-- [ ] 2.3 Migrar os callers em `PacketSniffer.cpp` (e qualquer outro) para
+- [x] 2.3 Migrar os callers em `PacketSniffer.cpp` (e qualquer outro) para
   `MuCipher::*`, removendo as cópias locais; verificar que `XorData` só existe em
   `MuCipher` (busca por `g_XorFilter` retorna 1 resultado) e o build passa.
 - [ ] 2.4 Commit da Fase 1 e teste em campo: ataque normal (0x11) e skill (0x19) produzem

@@ -8,6 +8,7 @@
 #include "include/Config.h"
 #include "include/Logger.h"
 #include "include/GameMemory.h"
+#include "include/MuCipher.h"
 #include "include/SimpleModulusCipher.h"
 #include "include/ViewportMap.h"
 #include "include/SkillMap.h"
@@ -182,9 +183,6 @@ static DWORD WINAPI TcpConnectThread(LPVOID)
     return 0;
 }
 
-// Forward declarations
-static void GameServerFullEncrypt(char* data, int len, BYTE xorKey, BYTE subKey);
-
 // ============================================================================
 // Receive thread: le comandos do MuProxy2 (SEND <hex>)
 // ============================================================================
@@ -312,35 +310,6 @@ static void SendLine(const char* line, int len)
     }
     LeaveCriticalSection(&g_TcpLock);
 }
-static HMODULE GetMainDllModule()
-{
-    return (HMODULE)GameMemory::GetMainDllBase();
-}
-
-static bool GetGameServerKeys(unsigned char* xorKey, unsigned char* subKey)
-{
-    // Chaves hardcoded - confirmadas via x32dbg em Main.dll+0x403F75/76
-    *xorKey = 0x36;
-    *subKey = 0x07;
-
-    // Loga apenas uma vez
-    static bool logged = false;
-    if (!logged) {
-        logged = true;
-        HMODULE hMain = GetMainDllModule();
-        if (hMain) {
-            uintptr_t base = (uintptr_t)hMain;
-            unsigned char memSub = *(unsigned char*)(base + 0x403F75);
-            unsigned char memXor = *(unsigned char*)(base + 0x403F76);
-            Logger::Log("PACKETSNIFFER", "Chaves: xor=0x%02X sub=0x%02X (mem: xor=0x%02X sub=0x%02X)",
-                *xorKey, *subKey, memXor, memSub);
-        } else {
-            Logger::Log("PACKETSNIFFER", "Chaves: xor=0x%02X sub=0x%02X", *xorKey, *subKey);
-        }
-    }
-    return true;
-}
-
 // Porta do game server detectada automaticamente via pacote C116
 // (0xC1 0x16 = "ConnectToServer": login server informa IP+porta do GS).
 // 0 = ainda nao detectado (usa o range hardcoded abaixo).
@@ -397,89 +366,6 @@ static bool GetSocketPort(SOCKET s, int* outPort) {
     return false;
 }
 
-static void GameServerFullEncrypt(char* data, int len, BYTE xorKey, BYTE subKey);
-
-// ============================================================================
-// XorFilter — Camada 2 de criptografia (PacketManager::XorData)
-// Tabela REAL lida do binario Main.dll em 0x7166FF20 (via x32dbg)
-// ============================================================================
-static const BYTE g_XorFilter[32] = {
-    0xAB, 0x11, 0xCD, 0xFE, 0x18, 0x23, 0xC5, 0xA3,
-    0xCA, 0x33, 0xC1, 0xCC, 0x66, 0x67, 0x21, 0xF3,
-    0x32, 0x12, 0x15, 0x35, 0x29, 0xFF, 0xFE, 0x1D,
-    0x44, 0xEF, 0xCD, 0x41, 0x26, 0x3C, 0x4E, 0x4D
-};
-
-static int GetMuHeaderSize(BYTE firstByte)
-{
-    switch (firstByte) {
-        case 0xC1: case 0xC3: return 2;
-        case 0xC2: case 0xC4: return 3;
-        default: return 0;
-    }
-}
-
-// ============================================================================
-// Camada 1: XOR+sub byte-a-byte (HackCheck::DecryptData)
-// ============================================================================
-static void GameServerDecryptLayer1(char* data, int len, BYTE xorKey, BYTE subKey)
-{
-    for (int i = 0; i < len; ++i)
-    {
-        unsigned char c = (unsigned char)data[i];
-        data[i] = (char)((c ^ xorKey) - subKey);
-    }
-}
-
-// ============================================================================
-// Camada 1: XOR+sub byte-a-byte (HackCheck::EncryptData)
-// ============================================================================
-static void GameServerEncryptLayer1(char* data, int len, BYTE xorKey, BYTE subKey)
-{
-    for (int i = 0; i < len; ++i)
-    {
-        unsigned char c = (unsigned char)data[i];
-        data[i] = (char)(((c + subKey) ^ xorKey));
-    }
-}
-
-// ============================================================================
-// Camada 2: XOR encadeado no corpo do pacote (PacketManager::XorData)
-// ============================================================================
-static void GameServerXorData(char* data, int start, int end)
-{
-    if (start >= end) return;
-    for (int n = start; n < end; ++n)
-    {
-        data[n] ^= (data[n - 1] ^ g_XorFilter[n % 32]);
-    }
-}
-
-// ============================================================================
-// Decifracao: Camada 1 (XOR+sub) — usada para display no log.
-//
-// ATENCAO (RE validada, 4 capturas): o BlackRock USa XorFilter (Camada 2) nos
-// pacotes de ataque C1 0x11. A cadeia real e:
-//   WIRE = Layer1( XorData[3,7)( plaintext ) )
-// Decifrar SO com Layer-1 (esta funcao) devolve a forma XorData
-// (ex.: "C1 07 11 EF ED B6 77"), NAO o plaintext real ("C1 07 11 00 1A 78 04").
-// Para o plaintext real, decifre Layer-1 e depois aplique GameServerXorData
-// (que e sua propria inversa) em [3, len).
-// O uso de XorData em outros opcodes C1 (ex.: movimento D4) ainda nao confirmado.
-// ============================================================================
-static void GameServerFullDecrypt(char* data, int len, BYTE xorKey, BYTE subKey)
-{
-    GameServerDecryptLayer1(data, len, xorKey, subKey);
-}
-
-// ============================================================================
-// Cifracao: APENAS Camada 1 (XOR+sub)
-// ============================================================================
-static void GameServerFullEncrypt(char* data, int len, BYTE xorKey, BYTE subKey)
-{
-    GameServerEncryptLayer1(data, len, xorKey, subKey);
-}
-
 static CRITICAL_SECTION g_ReasmLock;
 static bool g_ReasmInit = false;
 static std::map<SOCKET, std::vector<BYTE>> g_ReasmBuffers;
@@ -508,7 +394,7 @@ static int ReadMuPacketLength(const std::vector<BYTE>& buf)
 {
     if (buf.empty()) return 0;
     BYTE h = buf[0];
-    int hdr = GetMuHeaderSize(h);
+    int hdr = MuCipher::GetMuHeaderSize(h);
     if ((int)buf.size() < hdr) return 0;
     if (h == 0xC1 || h == 0xC3) return buf[1];
     if (h == 0xC2 || h == 0xC4) return (buf[1] << 8) | buf[2];
@@ -538,12 +424,12 @@ static void FlushReasmBuffer(SOCKET s, const char* dir, unsigned char xorKey, un
         memcpy(outBuf, pkt.data(), copyLen);
 
         if (isGameServer)
-            GameServerFullDecrypt(outBuf, copyLen, xorKey, subKey);
+            MuCipher::FullDecrypt(outBuf, copyLen, xorKey, subKey);
 
         // Parse de pacotes RECV (já decifrados) para alimentar os mapas dinâmicos.
         // Só processa tráfego do game server (porta 55902).
         if (isGameServer && dir && dir[0] == 'R') {
-            int hdr = GetMuHeaderSize((BYTE)outBuf[0]);
+            int hdr = MuCipher::GetMuHeaderSize((BYTE)outBuf[0]);
             if (hdr > 0 && copyLen > hdr) {
                 BYTE opcode = (BYTE)outBuf[hdr];
                 if (opcode == 0x13) {
@@ -602,7 +488,7 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
     bool isGameServer = GetSocketPort(s, &port) && IsGameServerPort(port);
 
     unsigned char xorKey = 0, subKey = 0;
-    if (isGameServer) GetGameServerKeys(&xorKey, &subKey);
+    if (isGameServer) MuCipher::GetGameServerKeys(&xorKey, &subKey);
 
     // Decifra pacotes do game server para logar em claro
     char decrypted[4096];
@@ -611,7 +497,7 @@ static void LogRaw(const char* dir, SOCKET s, const char* data, int len)
     if (isGameServer) {
         int copyLen = len < (int)sizeof(decrypted) ? len : (int)sizeof(decrypted);
         memcpy(decrypted, data, copyLen);
-        GameServerFullDecrypt(decrypted, copyLen, xorKey, subKey);
+        MuCipher::FullDecrypt(decrypted, copyLen, xorKey, subKey);
         src = decrypted;
         srcLen = copyLen;
     }
@@ -686,7 +572,7 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
 
         // ---- Decifra Layer-1 (XOR 0x36, sub 0x07) para mostrar plaintext no log ----
         // O jogo envia bytes cifrados (headers FC/FE), mas queremos ver C1/C2/C3/C4.
-        // Aplica GameServerFullDecrypt (apenas Layer-1, sem XorFilter) em uma copia.
+        // Aplica MuCipher::FullDecrypt (apenas Layer-1, sem XorFilter) em uma copia.
         int port = 0;
         bool isGS = GetSocketPort(s, &port) && IsGameServerPort(port);
         char decBuf[4096];
@@ -696,8 +582,8 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
             int copyLen = len < (int)sizeof(decBuf) ? len : (int)sizeof(decBuf);
             memcpy(decBuf, buf, copyLen);
             unsigned char xorKey = 0, subKey = 0;
-            GetGameServerKeys(&xorKey, &subKey);
-            GameServerFullDecrypt(decBuf, copyLen, xorKey, subKey);
+            MuCipher::GetGameServerKeys(&xorKey, &subKey);
+            MuCipher::FullDecrypt(decBuf, copyLen, xorKey, subKey);
             displayBuf = decBuf;
             displayLen = copyLen;
         }
@@ -1187,7 +1073,7 @@ bool InjectToServer(const uint8_t* data, int len) {
     uint8_t encrypted[4096];
     if (len > (int)sizeof(encrypted)) return false;
     memcpy(encrypted, data, len);
-    GameServerFullEncrypt((char*)encrypted, len, 0x36, 0x07);
+    MuCipher::FullEncrypt((char*)encrypted, len, 0x36, 0x07);
 
     // Envia no socket do jogo (vai para MuProxy2 → relay → GS real)
     int sent = TrueSend ? TrueSend(g_GameServerSocket, (const char*)encrypted, len, 0)
@@ -1220,7 +1106,7 @@ bool InjectC1Attack(const uint8_t* plaintext, int len) {
 
     // Camada 2 (XorData): XOR encadeado nos bytes de dado [3, len).
     // Append 0x404C10 -> XorData 0x404C90 (flag=1) no builder do jogo.
-    GameServerXorData((char*)buf, 3, len);
+    MuCipher::XorData((char*)buf, 3, len);
 
     // Camada 1 (Layer-1) + send (delega para InjectToServer)
     return InjectToServer(buf, len);
@@ -1244,7 +1130,7 @@ bool InjectSkillC1(const uint8_t* plaintext, int len) {
     // 1. XorData encadeado no payload [3,7) (anchor = byte 2 = 0x19)
     uint8_t buf[7];
     memcpy(buf, plaintext, 7);
-    GameServerXorData((char*)buf, 3, 7);
+    MuCipher::XorData((char*)buf, 3, 7);
 
     char xorHex[32];
     int xh = 0;

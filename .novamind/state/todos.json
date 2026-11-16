@@ -1,22 +1,34 @@
 [
   {
-    "content": "Criar proposal.md",
-    "status": "completed"
+    "content": "Fase 1 (MuCipher): build + commit das mudanças já feitas (2.1-2.3 prontas, 2.4 commit)",
+    "status": "in_progress"
   },
   {
-    "content": "specs/ — skip_specs (refactor pura)",
-    "status": "completed"
+    "content": "Fase 2: extrair DebugTools (DebugTools.cpp) do AttackModule + registrar comandos + build + commit",
+    "status": "pending"
   },
   {
-    "content": "Criar design.md",
-    "status": "completed"
+    "content": "Fase 3: NameRewriter + PacketReassembler + build + commit",
+    "status": "pending"
   },
   {
-    "content": "Criar tasks.md",
-    "status": "completed"
+    "content": "Fase 4: PacketInjector (porta única por opcode) + build + commit",
+    "status": "pending"
   },
   {
-    "content": "Mostrar status final",
-    "status": "completed"
+    "content": "Fase 5: CommandChannel (44412) + PacketChannel (44413) + build + commit",
+    "status": "pending"
+  },
+  {
+    "content": "Fase 6: WinsockHooks + preservar ordem em DllMain + build + commit",
+    "status": "pending"
+  },
+  {
+    "content": "Fase 7: GameMemory em sub-grupos + build + commit",
+    "status": "pending"
+  },
+  {
+    "content": "Atualizar tasks.md com o que foi concluído (checkboxes)",
+    "status": "pending"
   }
 ]
