@@ -11,11 +11,12 @@
 #include "include/PacketSniffer.h"
 #include "include/SkillMap.h"
 #include "include/Logger.h"
+#include "include/CommandParams.h"
+#include "include/DebugTools.h"
 
 #include <cstdio>
 #include <cstring>
 #include <cmath>
-#include <cstdlib>
 #include <map>
 #include <set>
 
@@ -430,448 +431,7 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
     return 0;
 }
 
-// ---- Utilitários: parse de key=value em strings ----
-static bool ParseIntParam(const char* s, const char* key, int* outVal) {
-    char search[64];
-    snprintf(search, sizeof(search), "%s=", key);
-    const char* p = strstr(s, search);
-    if (!p) return false;
-    p += strlen(search);
-    *outVal = atoi(p);
-    return true;
-}
-
-static bool ParseByteParam(const char* s, const char* key, uint8_t* outVal) {
-    char search[64];
-    snprintf(search, sizeof(search), "%s=", key);
-    const char* p = strstr(s, search);
-    if (!p) return false;
-    p += strlen(search);
-    int val = atoi(p);
-    *outVal = (uint8_t)val;
-    return true;
-}
-
-static bool ParseFloatParam(const char* s, const char* key, float* outVal) {
-    char search[64];
-    snprintf(search, sizeof(search), "%s=", key);
-    const char* p = strstr(s, search);
-    if (!p) return false;
-    p += strlen(search);
-    *outVal = (float)atof(p);
-    return true;
-}
-
-static bool ParseHexParam(const char* s, const char* key, uint16_t* outVal) {
-    char search[64];
-    snprintf(search, sizeof(search), "%s=", key);
-    const char* p = strstr(s, search);
-    if (!p) return false;
-    p += strlen(search);
-    unsigned int val;
-    if (sscanf_s(p, "%x", &val) == 1) {
-        *outVal = (uint16_t)val;
-        return true;
-    }
-    return false;
-}
-
-// ==== Lê DWORD com proteção contra access violation ====
-static DWORD SafeReadDword(uintptr_t addr) {
-    __try { return *(DWORD*)addr; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return 0xDEADDEAD; }
-}
-static WORD SafeReadWord(uintptr_t addr) {
-    __try { return *(WORD*)addr; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return 0xDEAD; }
-}
-static BYTE SafeReadByte(uintptr_t addr) {
-    __try { return *(BYTE*)addr; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFF; }
-}
-static float SafeReadFloat(uintptr_t addr) {
-    __try { return *(float*)addr; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return -9999.0f; }
-}
-
-// ==== DIAGNÓSTICO: despeja o ObjectManager completo com viewport scan ====
-static void DumpObjectManager() {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
-    if (!arrayBase) {
-        Logger::Log("ATTACK", "DUMP: ObjectArray null!");
-        return;
-    }
-
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
-    float lx = localPlayer ? SafeReadFloat(localPlayer + GameObject::OFF_X) : 0.0f;
-    float ly = localPlayer ? SafeReadFloat(localPlayer + GameObject::OFF_Y) : 0.0f;
-
-    Logger::Log("ATTACK", "==== DUMP FULL ObjectManager local=(%.1f,%.1f) ====", lx, ly);
-
-    int count = 0;
-    for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
-        uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
-
-        BYTE type = SafeReadByte(obj + GameObject::OFF_TYPE);
-        BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
-        if (type == 0 || !live) continue;
-
-        WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
-        float x = SafeReadFloat(obj + GameObject::OFF_X);
-        float y = SafeReadFloat(obj + GameObject::OFF_Y);
-        char name[64] = {};
-        GameMemory::GetName(i, name, sizeof(name));
-
-        float dx = x - lx, dy = y - ly;
-        float dist = sqrtf(dx * dx + dy * dy);
-        float distTiles = dist / TILE_SIZE;
-
-        BYTE compHi = (BYTE)((compIndex >> 8) & 0xFF);
-        BYTE compLo = (BYTE)(compIndex & 0xFF);
-        BYTE slotByte = (BYTE)(i & 0xFF);
-
-        // ===== Campos-chave com SafeRead (crash-safe) =====
-        DWORD vtblPtr = SafeReadDword(obj + 0x000);
-        DWORD dw074   = SafeReadDword(obj + 0x074);
-        DWORD dw078   = SafeReadDword(obj + 0x078);
-        DWORD dw07C   = SafeReadDword(obj + 0x07C);
-        DWORD dw080   = SafeReadDword(obj + 0x080);
-        DWORD dw084   = SafeReadDword(obj + 0x084);
-        DWORD dw29C   = SafeReadDword(obj + 0x29C);
-        DWORD dw2A0   = SafeReadDword(obj + 0x2A0);
-        DWORD dw2A4   = SafeReadDword(obj + 0x2A4);
-        DWORD dw2A8   = SafeReadDword(obj + 0x2A8);
-        DWORD dw30C   = SafeReadDword(obj + 0x30C);
-        DWORD dw320   = SafeReadDword(obj + 0x320);
-
-        WORD w070 = SafeReadWord(obj + 0x070);
-        WORD w072 = SafeReadWord(obj + 0x072);
-        WORD w076 = SafeReadWord(obj + 0x076);
-        WORD w078w = SafeReadWord(obj + 0x078);
-        WORD w07A = SafeReadWord(obj + 0x07A);
-        WORD w07Cw = SafeReadWord(obj + 0x07C);
-        WORD w07E = SafeReadWord(obj + 0x07E);  // OFF_INDEX
-        WORD w080w = SafeReadWord(obj + 0x080);
-        WORD w082 = SafeReadWord(obj + 0x082);
-        WORD w084w = SafeReadWord(obj + 0x084);
-
-        BYTE dirByte = SafeReadByte(obj + 0x070);  // byte de direção (ObjectPreview)
-
-        Logger::Log("ATTACK", "  [S %3d] t=%d l=%d idx=0x%04X[hi=%02X lo=%02X] slot=0x%02X(%d) pos=(%.1f,%.1f) d=%.0f(%.1ft) dir=%d(0x%02X) '%s'",
-                    i, type, live, compIndex, compHi, compLo, slotByte, slotByte, x, y, dist, distTiles, dirByte, dirByte, name);
-        Logger::Log("ATTACK", "    vtbl=0x%08X dw074=0x%08X dw078=0x%08X dw07C=0x%08X dw080=0x%08X dw084=0x%08X",
-                    vtblPtr, dw074, dw078, dw07C, dw080, dw084);
-        Logger::Log("ATTACK", "    w070=%04X w072=%04X w076=%04X w078=%04X w07A=%04X w07C=%04X w07E=%04X w080=%04X w082=%04X w084=%04X",
-                    w070, w072, w076, w078w, w07A, w07Cw, w07E, w080w, w082, w084w);
-        Logger::Log("ATTACK", "    vp: dw29C=0x%08X dw2A0=0x%08X dw2A4=0x%08X dw2A8=0x%08X",
-                    dw29C, dw2A0, dw2A4, dw2A8);
-        Logger::Log("ATTACK", "    live=0x%08X type=0x%08X",
-                    dw30C, dw320);
-
-        // ===== ATTACK ID SCAN: procura WORDs com byte alto = slotByte =====
-        int foundCount = 0;
-        for (int off = 0; off < GameAddresses::OBJECT_SIZE && foundCount < 8; off += 2) {
-            WORD val = SafeReadWord(obj + off);
-            if (val == 0xDEAD) continue;
-            BYTE valHi = (BYTE)((val >> 8) & 0xFF);
-            if (valHi == slotByte && val != 0 && val != compIndex && off != GameObject::OFF_INDEX) {
-                if (foundCount == 0) {
-                    Logger::Log("ATTACK", "    ATTACK_ID_CANDIDATES (slotByte=0x%02X):", slotByte);
-                }
-                Logger::Log("ATTACK", "      off=0x%03X val=0x%04X (hi=0x%02X lo=0x%02X)", off, val, valHi, (BYTE)(val & 0xFF));
-                foundCount++;
-            }
-        }
-
-        count++;
-    }
-    Logger::Log("ATTACK", "==== FIM DUMP %d objs vivos ====", count);
-}
-
-// ==== HEX DUMP: despeja o slot inteiro (0x598 bytes) com anotações ====
-static void HexDumpSlot(int slotIndex) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
-    if (!arrayBase) {
-        Logger::Log("ATTACK", "HEXDUMP: ObjectArray null!");
-        return;
-    }
-    if (slotIndex < 0 || slotIndex >= GameAddresses::MAX_OBJECTS) {
-        Logger::Log("ATTACK", "HEXDUMP: slot %d fora do range (0-%d)", slotIndex, GameAddresses::MAX_OBJECTS - 1);
-        return;
-    }
-
-    uintptr_t obj = arrayBase + slotIndex * GameAddresses::OBJECT_SIZE;
-    BYTE type = *(BYTE*)(obj + GameObject::OFF_TYPE);
-    BYTE live = *(BYTE*)(obj + GameObject::OFF_ISLIVE);
-    WORD compIndex = *(WORD*)(obj + GameObject::OFF_INDEX);
-    BYTE slotByte = (BYTE)(slotIndex & 0xFF);
-    char name[64];
-    GameMemory::GetName(slotIndex, name, sizeof(name));
-
-    Logger::Log("ATTACK", "==== HEXDUMP slot=%d type=%d live=%d idx=0x%04X slotByte=0x%02X(%d) name='%s' ====",
-                slotIndex, type, live, compIndex, slotByte, slotByte, name);
-
-    // Nomes de offsets conhecidos para anotação
-    struct OffsetName { int offset; const char* name; };
-    const OffsetName knownOffsets[] = {
-        {0x000, "vtbl"}, {0x038, "NAME"}, {0x07E, "INDEX"},
-        {0x19C, "LEVEL"}, {0x208, "LEVEL2"}, {0x29C, "INTPTR"},
-        {0x30C, "ISLIVE"}, {0x320, "TYPE"}, {0x338, "FLOAT1"},
-        {0x368, "SET"}, {0x404, "X"}, {0x408, "Y"},
-        {0x40C, "Z"}, {0x410, "X_SET"}, {0x414, "Y_SET"}, {0x418, "Z_SET"},
-    };
-
-    // Dump em blocos de 16 bytes (slot inteiro = 0x598 bytes = 89 rows)
-    for (int row = 0; row < GameAddresses::OBJECT_SIZE; row += 16) {
-        BYTE b[16];
-        memcpy(b, (BYTE*)(obj + row), 16);
-
-        // ASCII representation
-        char ascii[17];
-        for (int j = 0; j < 16; j++) {
-            ascii[j] = (b[j] >= 0x20 && b[j] <= 0x7E) ? (char)b[j] : '.';
-        }
-        ascii[16] = '\0';
-
-        // Check if any known offset falls in this row
-        char annotation[128] = "";
-        for (const auto& kn : knownOffsets) {
-            if (kn.offset >= row && kn.offset < row + 16) {
-                char tmp[64];
-                snprintf(tmp, sizeof(tmp), " <%s@0x%03X>", kn.name, kn.offset);
-                strcat_s(annotation, sizeof(annotation), tmp);
-            }
-        }
-
-        Logger::Log("ATTACK", "  %03X: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X  %s%s",
-                    row, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                    b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
-                    ascii, annotation);
-    }
-
-    // ATTACK ID SCAN: procura por WORDs com byte alto = slotByte em todo o slot
-    Logger::Log("ATTACK", "  --- ATTACK ID SCAN (slotByte=0x%02X) ---", slotByte);
-    for (int off = 0; off < GameAddresses::OBJECT_SIZE; off += 2) {
-        WORD val = *(WORD*)(obj + off);
-        BYTE valHi = (BYTE)((val >> 8) & 0xFF);
-        if (valHi == slotByte && val != 0 && val != compIndex) {
-            Logger::Log("ATTACK", "    offset=0x%03X value=0x%04X (hi=0x%02X lo=0x%02X) MATCH slotByte!",
-                        off, val, valHi, (BYTE)(val & 0xFF));
-        }
-    }
-
-    Logger::Log("ATTACK", "==== FIM HEXDUMP slot=%d ====", slotIndex);
-}
-
-// ==== SCANVALUE: busca um valor WORD em todos os 400 slots do ObjectManager ====
-// Procura por attack IDs, entity indexes, ou qualquer valor relevante.
-// Escaneia TODOS os slots (mesmo vazios) em busca do valor exato.
-static void ScanForValue(uint16_t searchValue) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
-    if (!arrayBase) {
-        Logger::Log("ATTACK", "SCANVALUE: ObjectArray null!");
-        return;
-    }
-
-    Logger::Log("ATTACK", "==== SCANVALUE 0x%04X ====", searchValue);
-
-    int totalFound = 0;
-    for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
-        uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
-        int foundInSlot = 0;
-
-        for (int off = 0; off < GameAddresses::OBJECT_SIZE; off += 2) {
-            WORD val = SafeReadWord(obj + off);
-            if (val == searchValue) {
-                BYTE type = SafeReadByte(obj + GameObject::OFF_TYPE);
-                BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
-                WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
-                char name[64] = {};
-                GameMemory::GetName(i, name, sizeof(name));
-
-                if (foundInSlot == 0) {
-                    Logger::Log("ATTACK", "  [S %3d] t=%d l=%d idx=0x%04X name='%s' — FOUND 0x%04X at:",
-                                i, type, live, compIndex, name, searchValue);
-                }
-                Logger::Log("ATTACK", "    off=0x%03X val=0x%04X", off, val);
-                foundInSlot++;
-                totalFound++;
-                if (foundInSlot >= 10) break; // limitar por slot
-            }
-        }
-    }
-
-    if (totalFound == 0) {
-        Logger::Log("ATTACK", "  Valor 0x%04X NÃO encontrado em nenhum slot!", searchValue);
-    } else {
-        Logger::Log("ATTACK", "  Total: %d ocorrências de 0x%04X", totalFound, searchValue);
-    }
-
-    // Busca adicional: procura por valores onde o high byte = high byte do searchValue
-    // e o low byte está próximo (±5) do low byte do searchValue
-    BYTE searchHi = (BYTE)((searchValue >> 8) & 0xFF);
-    BYTE searchLo = (BYTE)(searchValue & 0xFF);
-    Logger::Log("ATTACK", "  --- SCANVALUE NEAR: hi=0x%02X, lo=0x%02X (±5) ---", searchHi, searchLo);
-
-    for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
-        uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
-        int foundInSlot = 0;
-
-        for (int off = 0; off < GameAddresses::OBJECT_SIZE; off += 2) {
-            WORD val = SafeReadWord(obj + off);
-            if (val == 0xDEAD) continue;
-            BYTE valHi = (BYTE)((val >> 8) & 0xFF);
-            BYTE valLo = (BYTE)(val & 0xFF);
-            if (valHi == searchHi && abs((int)valLo - (int)searchLo) <= 5 && val != searchValue) {
-                if (foundInSlot == 0) {
-                    BYTE type = SafeReadByte(obj + GameObject::OFF_TYPE);
-                    BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
-                    WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
-                    char name[64] = {};
-                    GameMemory::GetName(i, name, sizeof(name));
-                    Logger::Log("ATTACK", "  [S %3d] t=%d l=%d idx=0x%04X name='%s' — NEAR:",
-                                i, type, live, compIndex, name);
-                }
-                Logger::Log("ATTACK", "    off=0x%03X val=0x%04X (hi=0x%02X lo=0x%02X)",
-                            off, val, valHi, valLo);
-                foundInSlot++;
-                if (foundInSlot >= 8) break;
-            }
-        }
-    }
-
-    Logger::Log("ATTACK", "==== FIM SCANVALUE ====");
-}
-
-// ==== SCANSLOT: busca um valor WORD em UM slot específico (hex dump + busca) ====
-static void ScanSlotForValue(int slotIndex, uint16_t searchValue) {
-    uintptr_t arrayBase = GameMemory::GetObjectArray();
-    if (!arrayBase) {
-        Logger::Log("ATTACK", "SCANSLOT: ObjectArray null!");
-        return;
-    }
-    if (slotIndex < 0 || slotIndex >= GameAddresses::MAX_OBJECTS) {
-        Logger::Log("ATTACK", "SCANSLOT: slot %d fora do range (0-%d)", slotIndex, GameAddresses::MAX_OBJECTS - 1);
-        return;
-    }
-
-    uintptr_t obj = arrayBase + slotIndex * GameAddresses::OBJECT_SIZE;
-    BYTE type = SafeReadByte(obj + GameObject::OFF_TYPE);
-    BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
-    WORD compIndex = SafeReadWord(obj + GameObject::OFF_INDEX);
-    char name[64] = {};
-    GameMemory::GetName(slotIndex, name, sizeof(name));
-
-    Logger::Log("ATTACK", "==== SCANSLOT slot=%d type=%d live=%d idx=0x%04X name='%s' search=0x%04X ====",
-                slotIndex, type, live, compIndex, name, searchValue);
-
-    // Mostra todos os WORDs no slot, marcando matches
-    for (int off = 0; off < GameAddresses::OBJECT_SIZE; off += 2) {
-        WORD val = SafeReadWord(obj + off);
-        if (val == 0x0000 && off > 0x040) continue; // pular zeros depois do header
-        if (val == 0xDEAD) continue;
-        const char* marker = (val == searchValue) ? " <<< MATCH!" : "";
-        BYTE valHi = (BYTE)((val >> 8) & 0xFF);
-        BYTE valLo = (BYTE)(val & 0xFF);
-        if (val != 0 || off < 0x040) {
-            Logger::Log("ATTACK", "  %03X: %04X (hi=%02X lo=%02X)%s", off, val, valHi, valLo, marker);
-        }
-    }
-    Logger::Log("ATTACK", "==== FIM SCANSLOT ====");
-}
-
-// ==== DIRSCAN: escaneia o player local buscando o byte de direção ====
-// Procura por bytes com valor 0-7 (direções em 8-dir) ou 0-15 (16-dir)
-// em offsets candidatos no objeto do jogador local.
-static void DirScan() {
-    uintptr_t localPlayer = GameMemory::GetLocalPlayer();
-    if (!localPlayer) {
-        Logger::Log("ATTACK", "DIRSCAN: localPlayer null! Tentando ObjectArray...");
-        uintptr_t arrayBase2 = GameMemory::GetObjectArray();
-        if (!arrayBase2) {
-            Logger::Log("ATTACK", "DIRSCAN: ObjectArray tambem null!");
-            return;
-        }
-        // Procura jogador (type=1) no array
-        for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
-            uintptr_t obj = arrayBase2 + i * GameAddresses::OBJECT_SIZE;
-            BYTE type = SafeReadByte(obj + GameObject::OFF_TYPE);
-            BYTE live = SafeReadByte(obj + GameObject::OFF_ISLIVE);
-            if (type == 1 && live) {
-                localPlayer = obj;
-                Logger::Log("ATTACK", "DIRSCAN: Encontrou player no slot %d (type=1, live=1)", i);
-                break;
-            }
-        }
-        if (!localPlayer) {
-            Logger::Log("ATTACK", "DIRSCAN: Nenhum player encontrado!");
-            return;
-        }
-    }
-
-    WORD compIndex = SafeReadWord(localPlayer + GameObject::OFF_INDEX);
-    char name[64] = {};
-    // Busca slot index para getName
-    uintptr_t arrayBase2 = GameMemory::GetObjectArray();
-    int playerSlot = -1;
-    for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
-        if ((arrayBase2 + i * GameAddresses::OBJECT_SIZE) == localPlayer) {
-            playerSlot = i;
-            break;
-        }
-    }
-    if (playerSlot >= 0) {
-        GameMemory::GetName(playerSlot, name, sizeof(name));
-    }
-
-    Logger::Log("ATTACK", "==== DIRSCAN player=0x%p idx=0x%04X slot=%d name='%s' ====",
-                (void*)localPlayer, compIndex, playerSlot, name);
-
-    // Offset candidatos comuns em MU Online para direção
-    static const int candidateOffsets[] = {
-        0x0C, 0x0D, 0x13, 0x14, 0x44, 0x45, 0x46, 0x47,
-        0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x50, 0x54, 0x58,
-        0x5C, 0x60, 0x64, 0x68, 0x6C, 0x70, 0x71, 0x74,
-        0x78, 0x88, 0x8C, 0x90, 0x94, 0x98, 0x9C, 0xA0,
-        0xA4, 0xA8, 0xAC, 0xB0, 0xB4, 0xB8, 0xBC, 0xC0,
-        0xC4, 0xC8, 0xCC, 0xD0, 0xD4, 0xD8, 0xDC, 0x100,
-        0x104, 0x108, 0x10C, 0x110, 0x114, 0x118, 0x11C,
-        0x180, 0x184, 0x188, 0x190, 0x194, 0x198, 0x19C,
-        0x1A0, 0x200, 0x204, 0x208, 0x300, 0x304, 0x308,
-        0x30C, 0x310, 0x314, 0x318, 0x320, 0x324, 0x328,
-        0x400, 0x404, 0x408, 0x40C, 0x410, 0x414, 0x418,
-    };
-
-    Logger::Log("ATTACK", "--- Offsets candidatos (bytes com valor 0-15) ---");
-    for (int off : candidateOffsets) {
-        BYTE b = SafeReadByte(localPlayer + off);
-        if (b <= 15) {
-            Logger::Log("ATTACK", "  off=0x%03X byte=0x%02X (%d) *** CANDIDATO ***", off, b, b);
-        } else {
-            Logger::Log("ATTACK", "  off=0x%03X byte=0x%02X (%d)", off, b, b);
-        }
-    }
-
-    // Escaneamento completo: todos os bytes com valor 0-7 no range 0x00-0x440
-    Logger::Log("ATTACK", "--- Escaneamento completo: bytes com valor 0-7 no range 0x00-0x440 ---");
-    for (int off = 0; off < 0x440; off++) {
-        BYTE b = SafeReadByte(localPlayer + off);
-        if (b <= 7) {
-            Logger::Log("ATTACK", "  off=0x%03X byte=0x%02X (%d)", off, b, b);
-        }
-    }
-
-    // Escaneamento para bytes com valor 8-15 (16-dir)
-    Logger::Log("ATTACK", "--- Escaneamento completo: bytes com valor 8-15 no range 0x00-0x440 ---");
-    for (int off = 0; off < 0x440; off++) {
-        BYTE b = SafeReadByte(localPlayer + off);
-        if (b >= 8 && b <= 15) {
-            Logger::Log("ATTACK", "  off=0x%03X byte=0x%02X (%d)", off, b, b);
-        }
-    }
-
-    Logger::Log("ATTACK", "==== FIM DIRSCAN ====");
-}
+// ---- Parse de key=value: helpers compartilhados em CommandParams.h ----
 
 // ============================================================================
 // Handlers de mensagens tipadas (registrados via REGISTER_MESSAGE)
@@ -887,21 +447,21 @@ static void HandleAttackStart(const char* payload) {
 
     if (payload && *payload) {
         int ival; float fval; uint16_t hval;
-        if (ParseIntParam(payload, "delay", &ival) && ival > 0) g_SessionDelayMs = ival;
-        if (ParseFloatParam(payload, "range", &fval) && fval > 0.0f) g_SessionRange = fval;
-        if (ParseHexParam(payload, "skill", &hval)) {
+        if (CommandParams::ParseIntParam(payload, "delay", &ival) && ival > 0) g_SessionDelayMs = ival;
+        if (CommandParams::ParseFloatParam(payload, "range", &fval) && fval > 0.0f) g_SessionRange = fval;
+        if (CommandParams::ParseHexParam(payload, "skill", &hval)) {
             g_SessionSkillId = hval;
             if (g_SessionType == 0) g_SessionType = MuOpcodes::ATKTYPE_SKILL;
         }
-        ParseByteParam(payload, "type", &g_SessionType);
-        if (ParseIntParam(payload, "hitcount", &ival) && ival >= 1) g_SessionHitCount = ival;
+        CommandParams::ParseByteParam(payload, "type", &g_SessionType);
+        if (CommandParams::ParseIntParam(payload, "hitcount", &ival) && ival >= 1) g_SessionHitCount = ival;
     }
 
     InterlockedExchange(&g_Attacking, 1);
     Logger::Log("ATTACK", "START auto-attack delay=%dms range=%.1f type=%s skill=0x%04X hitcount=%d",
                 g_SessionDelayMs, g_SessionRange,
                 g_SessionType ? "SKILL" : "NORMAL", g_SessionSkillId, g_SessionHitCount);
-    DumpObjectManager();
+    DebugTools::DumpObjectManager();
 }
 REGISTER_MESSAGE(ATTACK_START, HandleAttackStart);
 
@@ -915,22 +475,22 @@ REGISTER_MESSAGE(ATTACK_STOP, HandleAttackStop);
 static void HandleAttackConfig(const char* payload) {
     if (!payload || !*payload) return;
     int ival; float fval; uint16_t hval;
-    if (ParseIntParam(payload, "delay", &ival) && ival > 0) {
+    if (CommandParams::ParseIntParam(payload, "delay", &ival) && ival > 0) {
         g_Config.defaultDelayMs = ival;
         g_SessionDelayMs = ival;
     }
-    if (ParseFloatParam(payload, "range", &fval)) {
+    if (CommandParams::ParseFloatParam(payload, "range", &fval)) {
         g_Config.defaultRange = fval;
         g_SessionRange = fval;
     }
-    if (ParseByteParam(payload, "type", &g_Config.defaultType))
+    if (CommandParams::ParseByteParam(payload, "type", &g_Config.defaultType))
         g_SessionType = g_Config.defaultType;
-    if (ParseHexParam(payload, "skill", &hval)) {
+    if (CommandParams::ParseHexParam(payload, "skill", &hval)) {
         g_Config.defaultSkillId = hval;
         g_SessionSkillId = hval;
         if (g_SessionType == 0) g_SessionType = MuOpcodes::ATKTYPE_SKILL;
     }
-    if (ParseIntParam(payload, "hitcount", &ival) && ival >= 1) {
+    if (CommandParams::ParseIntParam(payload, "hitcount", &ival) && ival >= 1) {
         g_Config.defaultHitCount = ival;
         g_SessionHitCount = ival;
     }
@@ -942,7 +502,7 @@ REGISTER_MESSAGE(ATTACK_CONFIG, HandleAttackConfig);
 
 static void HandleAttackPlayerIdx(const char* payload) {
     uint16_t playerIdx = 0;
-    if (ParseHexParam(payload, "idx", &playerIdx) && playerIdx != 0) {
+    if (CommandParams::ParseHexParam(payload, "idx", &playerIdx) && playerIdx != 0) {
         GameMemory::SetLocalPlayerIndex(playerIdx);
         Logger::Log("ATTACK", "PLAYERIDX setado: 0x%04X", playerIdx);
     } else {
@@ -954,12 +514,6 @@ static void HandleAttackPlayerIdx(const char* payload) {
     }
 }
 REGISTER_MESSAGE(ATTACK_PLAYERIDX, HandleAttackPlayerIdx);
-
-static void HandleAttackDump(const char* payload) {
-    (void)payload;
-    DumpObjectManager();
-}
-REGISTER_MESSAGE(ATTACK_DUMP, HandleAttackDump);
 
 // Handler para SEND_PACKET (injeção de pacote direto no game server)
 static void HandleSendPacket(const char* payload) {

@@ -10,7 +10,7 @@
   `build.bat` ainda compila (nenhum estava em `SOURCES`) e que não há `#include` restante.
 - [x] 1.2 Apagar o rascunho `src/PacketSniffer.cpp.new` e verificar que nenhuma referência
   a `.cpp.new` existe no build ou nos scripts.
-- [ ] 1.3 Remover a fila de skill legado (`EnqueueSkillPacket`, `ProcessSkillQueue`,
+- [x] 1.3 Remover a fila de skill legado (`EnqueueSkillPacket`, `ProcessSkillQueue`,
   struct `SkillPacketEntry`, enum `SKILL_TYPE_*` de `PacketSniffer.h`) e verificar que o
   build passa e o skill continua indo por `InjectSkillC1` (teste em campo: cast de Force).
 - [x] 1.4 Corrigir comentários obsoletos (ex.: `AttackModule.h` linha ~34 "0xEFF5 ...
@@ -18,6 +18,8 @@
   a skill 0x19.
 - [ ] 1.5 Commit da Fase 0 e smoke test em campo (jogo abre, log sem erro, ataque normal
   funciona).
+  - [x] commit `e0945a2` (família PS.dll, `PacketSniffer.cpp.new`, fila de skill, comentários)
+  - [ ] smoke test em campo (usuário): jogo abre, log sem erro, ataque normal funciona
 
 ## 2. Fase 1 — Extrair `MuCipher` (criptografia única)
 
@@ -31,18 +33,26 @@
   `MuCipher` (busca por `g_XorFilter` retorna 1 resultado) e o build passa.
 - [ ] 2.4 Commit da Fase 1 e teste em campo: ataque normal (0x11) e skill (0x19) produzem
   os mesmos bytes no wire que antes (conferir no log `InjectSkillC1: after XorData`).
+  - [x] commit `c92afdc` (MuCipher criado, callers migrados, build OK)
+  - [ ] teste em campo (usuário): ataque normal + skill com os mesmos bytes no wire
 
 ## 3. Fase 2 — Extrair `DebugTools` do `AttackModule`
 
-- [ ] 3.1 Criar `src/DebugTools.h` + `src/DebugTools.cpp` (namespace `DebugTools`) e mover
-  `DumpObjectManager`, `HexDumpSlot`, `ScanForValue`, `ScanSlotForValue`, `DirScan`,
-  `SafeReadDword/Word/Byte/Float`; verificar que o build passa.
-- [ ] 3.2 Re-registrar os comandos de debug (`CMD ATTACK DUMP`, `CMD ATTACK SCAN`, etc.)
+- [x] 3.1 Criar `src/include/DebugTools.h` + `src/debug/DebugTools.cpp` (namespace
+  `DebugTools`) e mover `DumpObjectManager`, `HexDumpSlot`, `ScanForValue`,
+  `ScanSlotForValue`, `DirScan`, `SafeReadDword/Word/Byte/Float`; verificar que o build
+  passa. (Os scans ficaram em `src/debug/DebugScans.cpp`, mesma namespace, para manter
+  cada .cpp abaixo de ~400 linhas.)
+- [x] 3.2 Re-registrar os comandos de debug (`CMD ATTACK DUMP`, `CMD ATTACK SCAN`, etc.)
   apontando para `DebugTools` via `PacketHandler`/`MessageRegistry`; verificar que os
-  comandos respondem no MuProxy2.
-- [ ] 3.3 Adicionar `src/DebugTools.cpp` à `SOURCES` do `build.bat` e verificar o build.
-- [ ] 3.4 Commit da Fase 2 e verificar que `AttackModule.cpp` ficou só com config,
+  comandos respondem no MuProxy2. Tags registradas: `ATTACK_DUMP` (tag já usada pelo
+  MuProxy2), `ATTACK_HEXDUMP`, `ATTACK_SCANVALUE`, `ATTACK_SCANSLOT`, `ATTACK_DIRSCAN`.
+- [x] 3.3 Adicionar `src\debug\DebugTools.cpp` + `src\debug\DebugScans.cpp` à `SOURCES`
+  do `build.bat` e verificar o build.
+- [x] 3.4 Commit da Fase 2 e verificar que `AttackModule.cpp` ficou só com config,
   threads, build de pacotes e handlers (sem funções de dump/scan).
+  - `AttackModule.cpp`: 1072 → 626 linhas; helpers de parse `key=value` movidos para o
+    header compartilhado `src/include/CommandParams.h` (usado por AttackModule e DebugTools).
 
 ## 4. Fase 3 — Extrair `NameRewriter` e `PacketReassembler`
 
