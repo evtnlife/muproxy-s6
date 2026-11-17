@@ -86,12 +86,14 @@ namespace WinFormsMitm.Protocol
     public class AttackStartMessage
     {
         public int DelayMs, Range, HitCount, AttackType, SkillId;
+        public int AttackMonsters, AttackPlayersAll, AttackPlayersClick, AttackOthers;
 
         public static AttackStartMessage Parse(string payload) => new(); // não recebido, só enviado
 
         public string ToWire()
         {
             string s = $"ATTACK_START|delay={DelayMs}|range={Range}|type={AttackType}|hitcount={HitCount}";
+            s += $"|attackmonsters={AttackMonsters}|attackplayerall={AttackPlayersAll}|attackplayerclick={AttackPlayersClick}|attackothers={AttackOthers}";
             if (SkillId != 0) s += $"|skill={SkillId:X4}";
             return s;
         }
@@ -110,11 +112,13 @@ namespace WinFormsMitm.Protocol
     public class AttackConfigMessage
     {
         public int DelayMs, Range, HitCount, AttackType, SkillId;
+        public int AttackMonsters, AttackPlayersAll, AttackPlayersClick, AttackOthers;
 
         public static AttackConfigMessage Parse(string payload) => new();
         public string ToWire()
         {
             string s = $"ATTACK_CONFIG|delay={DelayMs}|range={Range}|type={AttackType}|hitcount={HitCount}";
+            s += $"|attackmonsters={AttackMonsters}|attackplayerall={AttackPlayersAll}|attackplayerclick={AttackPlayersClick}|attackothers={AttackOthers}";
             if (SkillId != 0) s += $"|skill={SkillId:X4}";
             return s;
         }
@@ -307,5 +311,37 @@ namespace WinFormsMitm.Protocol
 
         private static int SafeInt(string s) => int.TryParse(s, out int i) ? i : -1;
         private static uint SafeUInt(string s) => uint.TryParse(s, out uint i) ? i : 0;
+    }
+
+    /// <summary>
+    /// Estado do personagem local (vinda do byp.dll, 1x por segundo).
+    /// Formato: PLAYER_INFO|name=Fulano|level=82|map=0
+    /// O x,y NÃO vem por aqui — o proxy já rastreia a posição via pacotes D4.
+    /// </summary>
+    [MessageTag("PLAYER_INFO")]
+    public class PlayerInfoMessage
+    {
+        public string Name = "";
+        public int Level;
+        public int Map;
+
+        public static PlayerInfoMessage Parse(string payload)
+        {
+            var m = new PlayerInfoMessage();
+            foreach (var part in payload.Split('|'))
+            {
+                int eq = part.IndexOf('=');
+                if (eq <= 0) continue;
+                string k = part.Substring(0, eq);
+                string v = part.Substring(eq + 1);
+                switch (k)
+                {
+                    case "name": m.Name = v; break;
+                    case "level": m.Level = int.TryParse(v, out int l) ? l : 0; break;
+                    case "map": m.Map = int.TryParse(v, out int mp) ? mp : 0; break;
+                }
+            }
+            return m;
+        }
     }
 }

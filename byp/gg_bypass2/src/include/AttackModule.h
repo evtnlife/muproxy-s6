@@ -47,6 +47,10 @@ struct AttackConfig {
     uint8_t defaultType;      // 0=normal, 1=skill
     uint16_t defaultSkillId;  // Skill ID padrão para type=1
     int     defaultHitCount;  // Quantos hits por mob por ciclo (padrão: 1)
+    bool    defaultAttackMonsters;    // Atacar monstros (type 2)
+    bool    defaultAttackPlayersAll;  // Atacar todos os jogadores no range (type 1)
+    bool    defaultAttackPlayersClick;// Atacar jogador no clique (até ele sumir)
+    bool    defaultAttackOthers;      // Atacar outros (não-monstro, não-jogador)
 };
 
 // Inicializa o módulo e registra handler de comandos

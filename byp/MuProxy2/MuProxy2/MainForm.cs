@@ -34,6 +34,12 @@ private long _lastPotionResyncTicks;
         // Portas desta instância (base 0 = comportamento de hoje).
         private readonly InstanceAllocator _instance;
 
+        // Dados do personagem local (vindos do byp.dll via PLAYER_INFO).
+        private string _playerName = "";
+        private int _playerLevel;
+        private int _playerMap;
+        private string _lastTitle = "";
+
         HashSet<string> bypassed = new HashSet<string>();
 
         const string GMO_PATH_DEFAULT = @"F:\blackrockmu\main.exe";
@@ -93,6 +99,11 @@ private long _lastPotionResyncTicks;
             {
                 if (InvokeRequired) { BeginInvoke(UpdatePlayerInfo); return; }
                 UpdatePlayerInfo();
+            };
+            _dll.OnPlayerInfo += info =>
+            {
+                if (InvokeRequired) { BeginInvoke(() => UpdatePlayerHeader(info)); return; }
+                UpdatePlayerHeader(info);
             };
 
             _attackService = new AttackService(_dll, msg => Log(new LogEvent(DateTime.Now, msg)));
@@ -173,6 +184,79 @@ private long _lastPotionResyncTicks;
             };
         }
 
+        // Barra de título escura (DWM) + owner-draw dos ListViews. O visual
+        // dos controles fica nas propriedades deles (no Designer); aqui só
+        // fica o que o Designer não faz.
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            EnableDarkTitleBar();
+            WireListViewOwnerDraw();
+        }
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+        private void EnableDarkTitleBar()
+        {
+            void Apply()
+            {
+                int value = 1;
+                DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+            }
+            if (IsHandleCreated) Apply();
+            else HandleCreated += (s, e) => Apply();
+        }
+
+        private void WireListViewOwnerDraw()
+        {
+            foreach (var lv in new[] { lstMonsters, lvPackets })
+            {
+                if (lv == null) continue;
+                lv.DrawColumnHeader += DrawListHeader;
+                lv.DrawItem += DrawListItem;
+                lv.DrawSubItem += DrawListSubItem;
+            }
+        }
+
+        private static void DrawListHeader(object? sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            using var bg = new SolidBrush(Color.FromArgb(31, 35, 45));
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            using var border = new Pen(Color.FromArgb(38, 43, 54));
+            e.Graphics.DrawLine(border, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+            TextRenderer.DrawText(e.Graphics, e.Header?.Text ?? "", new Font("Segoe UI", 9F, FontStyle.Bold),
+                new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 16, e.Bounds.Height),
+                Color.FromArgb(227, 179, 65), TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        }
+
+        private static void DrawListItem(object? sender, DrawListViewItemEventArgs e)
+        {
+            e.DrawDefault = false;
+            bool selected = e.Item.Selected;
+            Color row = selected ? Color.FromArgb(42, 47, 58) : ((e.Item.Index % 2 == 0) ? Color.FromArgb(19, 21, 27) : Color.FromArgb(15, 17, 21));
+            using var bg = new SolidBrush(row);
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            // Linha de grade horizontal sutil (escura)
+            using var line = new Pen(Color.FromArgb(38, 43, 54));
+            e.Graphics.DrawLine(line, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+        }
+
+        private static void DrawListSubItem(object? sender, DrawListViewSubItemEventArgs e)
+        {
+            bool selected = e.Item?.Selected ?? false;
+            Color row = selected ? Color.FromArgb(42, 47, 58) : ((e.Item!.Index % 2 == 0) ? Color.FromArgb(19, 21, 27) : Color.FromArgb(15, 17, 21));
+            using var bg = new SolidBrush(row);
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            // Linha de grade vertical sutil (escura)
+            using var line = new Pen(Color.FromArgb(38, 43, 54));
+            e.Graphics.DrawLine(line, e.Bounds.Right - 1, e.Bounds.Top, e.Bounds.Right - 1, e.Bounds.Bottom);
+            TextRenderer.DrawText(e.Graphics, e.SubItem?.Text ?? "", new Font("Consolas", 9.5F),
+                new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 16, e.Bounds.Height),
+                Color.FromArgb(232, 233, 235), TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        }
+
         // ============ UI: Tabela de monstros ============
 
         private void UpdateMonsterListView()
@@ -211,6 +295,7 @@ private long _lastPotionResyncTicks;
         {
             toolTipPlayerCoord.Text = $"Player: ({x}, {y})";
             UpdatePlayerInfo();
+            UpdatePlayerHeader();
         }
 
         private void UpdatePlayerInfo()
@@ -221,6 +306,27 @@ private long _lastPotionResyncTicks;
             sb.Append($" | Pos:({_monsterService.PlayerX},{_monsterService.PlayerY})");
             sb.Append($" | Monsters:{_monsterService.Monsters.Count}");
             toolTipPlayerInfo.Text = sb.ToString();
+        }
+
+        // Atualiza o título da janela com nome/level/mapa (vindos do byp.dll).
+        // O x,y fica no status bar (toolTipPlayerCoord), atualizado a cada pacote D4.
+        private void UpdatePlayerHeader()
+        {
+            string baseTitle = $"MuProxy2 — base {_instance.Base}";
+            string newTitle = string.IsNullOrWhiteSpace(_playerName)
+                ? baseTitle
+                : $"{baseTitle} — {_playerName} · Lv {_playerLevel} · Map {_playerMap}";
+            if (newTitle == _lastTitle) return;
+            _lastTitle = newTitle;
+            Text = newTitle;
+        }
+
+        private void UpdatePlayerHeader(PlayerInfoMessage info)
+        {
+            _playerName = info.Name ?? "";
+            _playerLevel = info.Level;
+            _playerMap = info.Map;
+            UpdatePlayerHeader();
         }
 
         private void UpdateAttackUI(bool enabled)
@@ -237,6 +343,10 @@ private long _lastPotionResyncTicks;
             txtRange.Text = _attackService.Range.ToString();
             txtDelay.Text = _attackService.DelayMs.ToString();
             txtHitCount.Text = _attackService.HitCount.ToString();
+            chkAttackMonsters.Checked = _attackService.AttackMonsters;
+            chkAttackPlayerAll.Checked = _attackService.AttackPlayersAll;
+            chkAttackPlayerClick.Checked = _attackService.AttackPlayersClick;
+            chkAttackOthers.Checked = _attackService.AttackOthers;
 
             chkEnableAttack.CheckedChanged += (s, e) =>
             {
@@ -245,6 +355,34 @@ private long _lastPotionResyncTicks;
                     _attackService.Start();
                 else
                     _attackService.Stop();
+            };
+
+            chkAttackMonsters.CheckedChanged += (s, e) =>
+            {
+                if (_attackService == null) return;
+                _attackService.AttackMonsters = chkAttackMonsters.Checked;
+                _attackService.SendConfig();
+            };
+
+            chkAttackPlayerAll.CheckedChanged += (s, e) =>
+            {
+                if (_attackService == null) return;
+                _attackService.AttackPlayersAll = chkAttackPlayerAll.Checked;
+                _attackService.SendConfig();
+            };
+
+            chkAttackPlayerClick.CheckedChanged += (s, e) =>
+            {
+                if (_attackService == null) return;
+                _attackService.AttackPlayersClick = chkAttackPlayerClick.Checked;
+                _attackService.SendConfig();
+            };
+
+            chkAttackOthers.CheckedChanged += (s, e) =>
+            {
+                if (_attackService == null) return;
+                _attackService.AttackOthers = chkAttackOthers.Checked;
+                _attackService.SendConfig();
             };
 
             txtRange.TextChanged += (s, e) =>
@@ -395,8 +533,8 @@ private long _lastPotionResyncTicks;
 
             lblPotionState.Text = txt;
             lblPotionState.ForeColor = string.IsNullOrEmpty(st.Warn)
-                ? SystemColors.ControlText
-                : Color.FromArgb(180, 0, 0);
+                ? Color.FromArgb(232, 233, 235)
+                : Color.FromArgb(255, 120, 120);
 
             // O byp é a fonte da verdade: se ele está desligado e o checkbox
             // está marcado (ex.: o jogo reiniciou e o byp voltou do zero), o
@@ -584,11 +722,10 @@ private long _lastPotionResyncTicks;
                     skills.Add(new SkillOption(GetSkillName(skillId, level), skillId));
                 }
 
-                if (skills.Count == 0) return;
                 if (InvokeRequired)
-                    BeginInvoke(() => MergeSkillCombo(cbSkills, skills));
+                    BeginInvoke(() => ApplySkillList(cbSkills, skills, listType));
                 else
-                    MergeSkillCombo(cbSkills, skills);
+                    ApplySkillList(cbSkills, skills, listType);
                 Log(new LogEvent(DateTime.Now, $"[SKILL] F3 11: {skills.Count} skills (listType={listType})"));
                 return;
             }
@@ -643,6 +780,55 @@ private long _lastPotionResyncTicks;
             if (added > 0 && cb.SelectedIndex < 0) cb.SelectedIndex = 0;
         }
 
+        /// <summary>
+        /// Aplica a lista de skills do F3 11 conforme o listType:
+        ///   0 = clear+add (limpa o combo e adiciona as skills — login/troca de char),
+        ///   2 = remove (remove as skills indicadas),
+        ///   outro = add (merge sem duplicar).
+        /// </summary>
+        private void ApplySkillList(ComboBox cb, List<SkillOption> skills, byte listType)
+        {
+            if (listType == 0)
+            {
+                // clear+add: zera o combo e adiciona as skills do personagem.
+                // Garante que ao reconectar / trocar de char não fiquem skills
+                // do personagem anterior nem duplicadas.
+                cb.BeginUpdate();
+                try
+                {
+                    cb.Items.Clear();
+                    foreach (var s in skills) cb.Items.Add(s);
+                    if (cb.Items.Count > 0) cb.SelectedIndex = 0;
+                }
+                finally { cb.EndUpdate(); }
+                return;
+            }
+            if (listType == 2)
+            {
+                // remove: remove as skills indicadas
+                var toRemove = new HashSet<int>();
+                foreach (var s in skills) toRemove.Add(s.Action);
+                for (int i = cb.Items.Count - 1; i >= 0; i--)
+                {
+                    if (cb.Items[i] is SkillOption so && toRemove.Contains(so.Action))
+                        cb.Items.RemoveAt(i);
+                }
+                return;
+            }
+            // add: merge sem duplicar
+            MergeSkillCombo(cb, skills);
+        }
+
+        /// <summary>Zera o combo de skills (chamado ao desconectar o byp).</summary>
+        private void ClearSkillCombo()
+        {
+            if (cbSkills == null) return;
+            if (InvokeRequired) { BeginInvoke(ClearSkillCombo); return; }
+            cbSkills.Items.Clear();
+            cbSkills.Items.Add(new SkillOption("Aguardando skills...", 0));
+            cbSkills.SelectedIndex = 0;
+        }
+
         private void PopulateSkills(ComboBox cbSkills)
         {
             cbSkills.Items.Clear();
@@ -663,7 +849,18 @@ private long _lastPotionResyncTicks;
         // ============ UI: Log ============
 
         private static CheckBox MkChk(string text, bool chk)
-            => new CheckBox { Text = text, Checked = chk, AutoSize = true, Margin = new Padding(6, 4, 0, 0) };
+            => new CheckBox
+            {
+                Text = text,
+                Checked = chk,
+                AutoSize = true,
+                Margin = new Padding(6, 4, 0, 0),
+                ForeColor = Color.FromArgb(232, 233, 235),
+                BackColor = Color.FromArgb(24, 27, 34),
+                FlatStyle = FlatStyle.Flat,
+                FlatAppearance = { BorderColor = Color.FromArgb(51, 58, 71), CheckedBackColor = Color.FromArgb(227, 179, 65) },
+                Font = new Font("Segoe UI", 9F)
+            };
 
         private void OpenLogFile()
         {
@@ -741,10 +938,10 @@ private long _lastPotionResyncTicks;
         {
             var panel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Top, Height = 28, AutoSize = false,
-                WrapContents = false, BackColor = System.Drawing.Color.FromArgb(240, 240, 240)
+                Dock = DockStyle.Left, AutoSize = false, Width = 720,
+                WrapContents = false, BackColor = Color.FromArgb(24, 27, 34), Padding = new Padding(6, 4, 0, 0)
             };
-            var lbl = new Label { Text = "Filtros:", AutoSize = true, Margin = new Padding(4, 6, 0, 0) };
+            var lbl = new Label { Text = "Filtros:", AutoSize = true, Margin = new Padding(4, 6, 8, 0), ForeColor = Color.FromArgb(178, 184, 196), Font = new Font("Segoe UI", 9F) };
             panel.Controls.Add(lbl);
 
             chkHook = MkChk("HOOK", false);
@@ -755,7 +952,7 @@ private long _lastPotionResyncTicks;
             chkOther = MkChk("Outros", false);
 
             panel.Controls.AddRange(new Control[] { chkHook, chkRaw, chkSend, chkMon, chkAtk, chkOther });
-            tabLogs.Controls.Add(panel);
+            logsTop.Controls.Add(panel);
             panel.BringToFront();
             SetupPacketTypeFilter();
         }
@@ -876,6 +1073,13 @@ private long _lastPotionResyncTicks;
                 // usuário teria que desmarcar/marcar para o byp acordar.
                 if (InvokeRequired) { BeginInvoke(SchedulePotionApply); return; }
                 SchedulePotionApply();
+            };
+            // Ao desconectar (jogo fechado), zera o combo de skills para não
+            // manter skills do personagem anterior na próxima sessão.
+            _dll!.OnDllDisconnected += () =>
+            {
+                if (InvokeRequired) { BeginInvoke(ClearSkillCombo); return; }
+                ClearSkillCombo();
             };
         }
 

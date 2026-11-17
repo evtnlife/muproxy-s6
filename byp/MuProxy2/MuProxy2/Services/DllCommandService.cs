@@ -22,6 +22,7 @@ namespace WinFormsMitm.Services
         public event Action<List<EntityMessage>>? OnMonsterList;
         public event Action<string, byte[]>? OnPacketSniffed;  // PKT decriptado do byp.dll
         public event Action<PotionStateMessage>? OnPotionState; // estado do auto-potion
+        public event Action<PlayerInfoMessage>? OnPlayerInfo;   // nome/level/mapa do personagem
 
         // ---- Evento de log (para UI) ----
         public event Action<string>? OnLog;
@@ -96,6 +97,10 @@ namespace WinFormsMitm.Services
 
                 case PotionStateMessage potion:
                     OnPotionState?.Invoke(potion);
+                    break;
+
+                case PlayerInfoMessage playerInfo:
+                    OnPlayerInfo?.Invoke(playerInfo);
                     break;
 
                 case null:

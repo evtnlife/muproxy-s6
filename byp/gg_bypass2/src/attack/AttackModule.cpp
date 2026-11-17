@@ -3,6 +3,7 @@
 #include "MuOpcodes.h"
 #include "GameMemory/Object.h"
 #include "GameMemory/Player.h"
+#include "GameMemory/Globals.h"
 #include "GameObject.h"
 #include "ObjType.h"
 #include "GameAddresses.h"
@@ -37,10 +38,10 @@ static HANDLE g_hThread = nullptr;
 static volatile LONG g_Running = 0;
 static volatile LONG g_Attacking = 0;
 
-// ---- Monster Map: entityIndex -> ativo (protegido por CriticalSection) ----
-static std::map<uint16_t, bool> g_MonsterMap;
+// ---- Target Map: entityIndex -> type (protegido por CriticalSection) ----
+static std::map<uint16_t, uint8_t> g_MonsterMap;  // entityIndex -> ObjType (1=player, 2=monstro, 4=NPC, ...)
 static CRITICAL_SECTION g_MapLock;
-static HANDLE g_hNewMonsterEvent = nullptr;  // sinalizado quando novo monstro aparece
+static HANDLE g_hNewMonsterEvent = nullptr;  // sinalizado quando novo alvo aparece
 static HANDLE g_hWatcherThread = nullptr;
 static HANDLE g_hDispatcherThread = nullptr;
 
@@ -50,7 +51,11 @@ static AttackConfig g_Config = {
     0.0f,   // defaultRange (0 = sem limite)
     0,      // defaultType (0 = normal)
     0x003C, // defaultSkillId (60 = SKILL_FORCE do DL — número real da skill)
-    1       // defaultHitCount
+    1,      // defaultHitCount
+    true,   // defaultAttackMonsters (atacar monstros)
+    false,  // defaultAttackPlayersAll (atacar todos os jogadores)
+    false,  // defaultAttackPlayersClick (atacar jogador no clique)
+    false   // defaultAttackOthers (atacar outros)
 };
 
 // ---- Parâmetros da sessão de ataque ativa ----
@@ -58,7 +63,11 @@ static int     g_SessionDelayMs = 800;
 static float   g_SessionRange   = 0.0f;
 static uint8_t g_SessionType    = 0;      // 0=normal, 1=skill
 static uint16_t g_SessionSkillId = 0;
-static int     g_SessionHitCount = 1;     // hits por mob por ciclo
+static int     g_SessionHitCount = 1;     // hits por alvo por ciclo
+static volatile LONG g_SessionAttackMonsters    = 1;  // 1 = atacar monstros (type 2)
+static volatile LONG g_SessionAttackPlayersAll  = 0;  // 1 = atacar todos os jogadores (type 1)
+static volatile LONG g_SessionAttackPlayersClick = 0; // 1 = atacar jogador no clique
+static volatile LONG g_SessionAttackOthers      = 0;  // 1 = atacar outros (não 1, não 2)
 
 AttackConfig& GetConfig() { return g_Config; }
 
@@ -298,8 +307,8 @@ static DWORD WINAPI AttackSingleMobThread(LPVOID param) {
     return 0;
 }
 
-// ---- Watcher Thread: escaneia ObjectManager, mantém o map de monstros ativos ----
-// Detecta novos monstros (sinaliza Dispatcher) e remove monstros mortos.
+// ---- Watcher Thread: escaneia ObjectManager, mantém o map de alvos ativos ----
+// Detecta novos alvos (monstros + jogadores) e sinaliza o Dispatcher.
 static DWORD WINAPI WatcherThread(LPVOID) {
     Logger::Log("ATTACK", "Watcher iniciado");
     while (InterlockedCompareExchange(&g_Running, 1, 1) == 1) {
@@ -310,15 +319,22 @@ static DWORD WINAPI WatcherThread(LPVOID) {
             float lx = *(float*)(localPlayer + GameObject::OFF_X);
             float ly = *(float*)(localPlayer + GameObject::OFF_Y);
 
-            // Coleta entity indices dos monstros vivos no range
-            std::set<uint16_t> currentSet;
+            // Coleta entity indices e tipos dos alvos vivos no range
+            // (monstros, jogadores e/ou outros, conforme os checkboxes)
+            std::map<uint16_t, uint8_t> currentSet;
             for (int i = 0; i < GameAddresses::MAX_OBJECTS; ++i) {
                 uintptr_t obj = arrayBase + i * GameAddresses::OBJECT_SIZE;
                 if (!obj) continue;
 
                 BYTE type = *(BYTE*)(obj + GameObject::OFF_TYPE);
                 BYTE live = *(BYTE*)(obj + GameObject::OFF_ISLIVE);
-                if (type == ObjType::OBJ_PLAYER || !live) continue;
+                if (!live) continue;
+
+                bool include = false;
+                if (type == ObjType::OBJ_MONSTER && g_SessionAttackMonsters) include = true;
+                else if (type == ObjType::OBJ_PLAYER && (g_SessionAttackPlayersAll || g_SessionAttackPlayersClick)) include = true;
+                else if (type != ObjType::OBJ_MONSTER && type != ObjType::OBJ_PLAYER && g_SessionAttackOthers) include = true;
+                if (!include) continue;
 
                 uint16_t entityIndex = *(uint16_t*)(obj + GameObject::OFF_INDEX);
                 if (entityIndex == 0) continue;
@@ -331,17 +347,17 @@ static DWORD WINAPI WatcherThread(LPVOID) {
                     if (sqrtf(dx * dx + dy * dy) > rangeInGameUnits) continue;
                 }
 
-                currentSet.insert(entityIndex);
+                currentSet[entityIndex] = type;
             }
 
             EnterCriticalSection(&g_MapLock);
 
             bool changed = false;
 
-            // Remove monstros que morreram/sumiram
+            // Remove alvos que morreram/sumiram
             for (auto it = g_MonsterMap.begin(); it != g_MonsterMap.end(); ) {
                 if (currentSet.find(it->first) == currentSet.end()) {
-                    Logger::Log("ATTACK", "Watcher: monstro 0x%04X removido (morreu/sumiu)", it->first);
+                    Logger::Log("ATTACK", "Watcher: alvo 0x%04X removido (morreu/sumiu)", it->first);
                     it = g_MonsterMap.erase(it);
                     changed = true;
                 } else {
@@ -349,11 +365,11 @@ static DWORD WINAPI WatcherThread(LPVOID) {
                 }
             }
 
-            // Adiciona novos monstros e sinaliza o Dispatcher
-            for (auto idx : currentSet) {
-                if (g_MonsterMap.find(idx) == g_MonsterMap.end()) {
-                    g_MonsterMap[idx] = true;
-                    Logger::Log("ATTACK", "Watcher: novo monstro 0x%04X detectado", idx);
+            // Adiciona novos alvos e sinaliza o Dispatcher
+            for (auto& pair : currentSet) {
+                if (g_MonsterMap.find(pair.first) == g_MonsterMap.end()) {
+                    g_MonsterMap[pair.first] = pair.second;
+                    Logger::Log("ATTACK", "Watcher: novo alvo 0x%04X detectado (type=%d)", pair.first, pair.second);
                     SetEvent(g_hNewMonsterEvent);  // acorda o Dispatcher
                     changed = true;
                 }
@@ -368,7 +384,13 @@ static DWORD WINAPI WatcherThread(LPVOID) {
 
                     BYTE type = *(BYTE*)(obj + GameObject::OFF_TYPE);
                     BYTE live = *(BYTE*)(obj + GameObject::OFF_ISLIVE);
-                    if (type == ObjType::OBJ_PLAYER || !live) continue;
+                    if (!live) continue;
+
+                    bool include = false;
+                    if (type == ObjType::OBJ_MONSTER && g_SessionAttackMonsters) include = true;
+                    else if (type == ObjType::OBJ_PLAYER && (g_SessionAttackPlayersAll || g_SessionAttackPlayersClick)) include = true;
+                    else if (type != ObjType::OBJ_MONSTER && type != ObjType::OBJ_PLAYER && g_SessionAttackOthers) include = true;
+                    if (!include) continue;
 
                     uint16_t entityIndex = *(uint16_t*)(obj + GameObject::OFF_INDEX);
                     if (entityIndex == 0) continue;
@@ -407,8 +429,10 @@ static DWORD WINAPI WatcherThread(LPVOID) {
 // ---- Dispatcher Thread: dispara threads de ataque para monstros do map ----
 // Acorda quando um novo monstro aparece (event) OU no timeout do delay.
 static DWORD WINAPI DispatcherThread(LPVOID) {
-    Logger::Log("ATTACK", "Dispatcher iniciado (delay=%dms, range=%.1f, hitcount=%d)",
-                g_SessionDelayMs, g_SessionRange, g_SessionHitCount);
+    Logger::Log("ATTACK", "Dispatcher iniciado (delay=%dms, range=%.1f, hitcount=%d, monsters=%d, playersAll=%d, playersClick=%d, others=%d)",
+                g_SessionDelayMs, g_SessionRange, g_SessionHitCount,
+                (int)g_SessionAttackMonsters, (int)g_SessionAttackPlayersAll,
+                (int)g_SessionAttackPlayersClick, (int)g_SessionAttackOthers);
 
     DWORD lastAttackTick = 0;
 
@@ -440,48 +464,141 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
         int hitCount = g_SessionHitCount;
         if (hitCount < 1) hitCount = 1;
 
-        // Copia o map sob lock para disparar threads fora do lock
-        EnterCriticalSection(&g_MapLock);
-        int targetCount = (int)g_MonsterMap.size();
-        uint16_t* targets = nullptr;
-        if (targetCount > 0) {
-            targets = new uint16_t[targetCount];
-            int idx = 0;
-            for (auto& pair : g_MonsterMap) {
-                targets[idx++] = pair.first;
+        bool didAttack = false;
+
+        // ---- Modo: atacar alvos do map (monstros/outros + jogadores se "atacar todos") ----
+        // O map contém os tipos selecionados. Jogadores só são atacados pelo map
+        // se "Atacar todos" estiver marcado; caso contrário, são atacados só pelo clique.
+        {
+            EnterCriticalSection(&g_MapLock);
+            int targetCount = 0;
+            uint16_t* targets = nullptr;
+            if (!g_MonsterMap.empty()) {
+                // Conta quantos alvos serão atacados (exclui jogadores se só "no clique")
+                for (auto& pair : g_MonsterMap) {
+                    if (pair.second == ObjType::OBJ_PLAYER && !g_SessionAttackPlayersAll) continue;
+                    targetCount++;
+                }
+                if (targetCount > 0) {
+                    targets = new uint16_t[targetCount];
+                    int idx = 0;
+                    for (auto& pair : g_MonsterMap) {
+                        if (pair.second == ObjType::OBJ_PLAYER && !g_SessionAttackPlayersAll) continue;
+                        targets[idx++] = pair.first;
+                    }
+                }
+            }
+            LeaveCriticalSection(&g_MapLock);
+
+            if (targetCount > 0) {
+                didAttack = true;
+
+                // Resumo a cada 5s (visibilidade sem despejar o log).
+                static DWORD lastSummaryTick = 0;
+                static long roundCount = 0;
+                roundCount++;
+                if (lastSummaryTick == 0) lastSummaryTick = GetTickCount();
+                else if (now - lastSummaryTick >= 5000) {
+                    const long rounds = roundCount;
+                    lastSummaryTick = now;
+                    roundCount = 0;
+                    Logger::Log("ATTACK", "Dispatcher: %ld rodadas em 5s (%d alvo(s), delay=%dms)",
+                                rounds, targetCount, g_SessionDelayMs);
+                }
+
+                // Fire-and-forget: uma thread por alvo (sem log por ciclo — evita poluir o log)
+                for (int t = 0; t < targetCount; t++) {
+                    auto* p = new AttackThreadParam{ targets[t], hitCount };
+                    HANDLE h = CreateThread(NULL, 0, AttackSingleMobThread, p, 0, NULL);
+                    if (h) {
+                        CloseHandle(h);
+                    } else {
+                        delete p;
+                    }
+                }
+            }
+
+            delete[] targets;
+        }
+
+        // ---- Modo: atacar jogador no clique (até ele sumir) ----
+        // O jogo grava o slot do alvo clicado em 0x081C03A0 (TargetSlotIndex, -1 = nenhum)
+        // e o entity index em 0x081C03A4 (TargetEntityIndex, usado em skill packets).
+        // Usamos o slot (acesso direto ao array) com fallback para busca por entity index.
+        // Só ataca se o alvo clicado for um jogador (type 1) e estiver vivo.
+        if (g_SessionAttackPlayersClick) {
+            int32_t clickedSlot = GameMemory::Globals::TargetSlotIndex();
+            uint16_t clickedIdx = GameMemory::Globals::TargetEntityIndex();
+
+            // Diagnóstico temporário: loga os valores a cada ~2s
+            {
+                static DWORD lastClickLog = 0;
+                DWORD nowTick = GetTickCount();
+                if (nowTick - lastClickLog >= 2000) {
+                    lastClickLog = nowTick;
+                    uintptr_t dbgObj = 0;
+                    if (clickedSlot >= 0 && clickedSlot < GameAddresses::MAX_OBJECTS) {
+                        dbgObj = GameMemory::Object::ByIndex(clickedSlot);
+                    } else if (clickedIdx != 0) {
+                        dbgObj = GameMemory::Object::FindByEntityIndex(clickedIdx);
+                    }
+                    if (dbgObj) {
+                        BYTE dbgType = *(BYTE*)(dbgObj + GameObject::OFF_TYPE);
+                        BYTE dbgLive = *(BYTE*)(dbgObj + GameObject::OFF_ISLIVE);
+                        uint16_t dbgIdx = *(uint16_t*)(dbgObj + GameObject::OFF_INDEX);
+                        Logger::Log("ATTACK", "ClickDiag: slot=%d entityIdx=0x%04X objIdx=0x%04X type=%d live=%d",
+                                    clickedSlot, clickedIdx, dbgIdx, dbgType, dbgLive);
+                    } else {
+                        Logger::Log("ATTACK", "ClickDiag: slot=%d entityIdx=0x%04X obj=NULL", clickedSlot, clickedIdx);
+                    }
+                }
+            }
+
+            // Resolve o objeto alvo: tenta pelo slot primeiro, senão pelo entity index
+            uintptr_t targetObj = 0;
+            if (clickedSlot >= 0 && clickedSlot < GameAddresses::MAX_OBJECTS) {
+                targetObj = GameMemory::Object::ByIndex(clickedSlot);
+            }
+            if (!targetObj && clickedIdx != 0) {
+                targetObj = GameMemory::Object::FindByEntityIndex(clickedIdx);
+            }
+
+            if (targetObj) {
+                BYTE type = *(BYTE*)(targetObj + GameObject::OFF_TYPE);
+                BYTE live = *(BYTE*)(targetObj + GameObject::OFF_ISLIVE);
+                if (type == ObjType::OBJ_PLAYER && live) {
+                    // Usa o entity index do objeto (não o do global) para o pacote
+                    uint16_t targetEntityIdx = *(uint16_t*)(targetObj + GameObject::OFF_INDEX);
+                    bool inRange = true;
+                    if (g_SessionRange > 0.0f) {
+                        uintptr_t localPlayer = GameMemory::Player::Object();
+                        if (localPlayer) {
+                            float lx = *(float*)(localPlayer + GameObject::OFF_X);
+                            float ly = *(float*)(localPlayer + GameObject::OFF_Y);
+                            float tx = *(float*)(targetObj + GameObject::OFF_X);
+                            float ty = *(float*)(targetObj + GameObject::OFF_Y);
+                            float dx = tx - lx, dy = ty - ly;
+                            float dist = sqrtf(dx * dx + dy * dy);
+                            inRange = (dist <= g_SessionRange * TILE_SIZE);
+                        }
+                    }
+                    if (inRange) {
+                        didAttack = true;
+                        for (int h = 0; h < hitCount; h++) {
+                            if (g_SessionType == (uint8_t)MuOpcodes::AttackType::Skill) {
+                                SendSkillAttack(targetEntityIdx, g_SessionSkillId);
+                            } else {
+                                SendAttack(targetEntityIdx);
+                            }
+                        }
+                    }
+                }
             }
         }
-        LeaveCriticalSection(&g_MapLock);
 
-        if (targetCount == 0) continue;
-
-        lastAttackTick = GetTickCount();
-
-        // Resumo a cada 5s (visibilidade sem despejar o log).
-        static DWORD lastSummaryTick = 0;
-        static long roundCount = 0;
-        roundCount++;
-        if (lastSummaryTick == 0) lastSummaryTick = GetTickCount();
-        else if (now - lastSummaryTick >= 5000) {
-            const long rounds = roundCount;
-            lastSummaryTick = now;
-            roundCount = 0;
-            Logger::Log("ATTACK", "Dispatcher: %ld rodadas em 5s (%d alvo(s), delay=%dms)",
-                        rounds, targetCount, g_SessionDelayMs);
+        if (didAttack) {
+            lastAttackTick = GetTickCount();
         }
-
-        // Fire-and-forget: uma thread por monstro (sem log por ciclo — evita poluir o log)
-        for (int t = 0; t < targetCount; t++) {
-            auto* p = new AttackThreadParam{ targets[t], hitCount };
-            HANDLE h = CreateThread(NULL, 0, AttackSingleMobThread, p, 0, NULL);
-            if (h) {
-                CloseHandle(h);
-            } else {
-                delete p;
-            }
-        }
-
-        delete[] targets;
     }
 
     Logger::Log("ATTACK", "Dispatcher encerrado");
@@ -495,12 +612,16 @@ static DWORD WINAPI DispatcherThread(LPVOID) {
 // ============================================================================
 
 static void HandleAttackStart(const char* payload) {
-    // payload: "delay=500|range=8|type=0|hitcount=3|skill=1E"
+    // payload: "delay=500|range=8|type=0|hitcount=3|skill=1E|attackmonsters=1|attackplayerall=0|attackplayerclick=0|attackothers=0"
     g_SessionDelayMs = g_Config.defaultDelayMs;
     g_SessionRange   = g_Config.defaultRange;
     g_SessionType    = g_Config.defaultType;
     g_SessionSkillId = g_Config.defaultSkillId;
     g_SessionHitCount = g_Config.defaultHitCount;
+    g_SessionAttackMonsters    = g_Config.defaultAttackMonsters ? 1 : 0;
+    g_SessionAttackPlayersAll  = g_Config.defaultAttackPlayersAll ? 1 : 0;
+    g_SessionAttackPlayersClick = g_Config.defaultAttackPlayersClick ? 1 : 0;
+    g_SessionAttackOthers      = g_Config.defaultAttackOthers ? 1 : 0;
 
     if (payload && *payload) {
         int ival; float fval; uint16_t hval;
@@ -512,12 +633,18 @@ static void HandleAttackStart(const char* payload) {
         }
         CommandParams::ParseByteParam(payload, "type", &g_SessionType);
         if (CommandParams::ParseIntParam(payload, "hitcount", &ival) && ival >= 1) g_SessionHitCount = ival;
+        if (CommandParams::ParseIntParam(payload, "attackmonsters", &ival)) g_SessionAttackMonsters = (ival != 0) ? 1 : 0;
+        if (CommandParams::ParseIntParam(payload, "attackplayerall", &ival)) g_SessionAttackPlayersAll = (ival != 0) ? 1 : 0;
+        if (CommandParams::ParseIntParam(payload, "attackplayerclick", &ival)) g_SessionAttackPlayersClick = (ival != 0) ? 1 : 0;
+        if (CommandParams::ParseIntParam(payload, "attackothers", &ival)) g_SessionAttackOthers = (ival != 0) ? 1 : 0;
     }
 
     InterlockedExchange(&g_Attacking, 1);
-    Logger::Log("ATTACK", "START auto-attack delay=%dms range=%.1f type=%s skill=0x%04X hitcount=%d",
+    Logger::Log("ATTACK", "START auto-attack delay=%dms range=%.1f type=%s skill=0x%04X hitcount=%d monsters=%d playersAll=%d playersClick=%d others=%d",
                 g_SessionDelayMs, g_SessionRange,
-                g_SessionType ? "SKILL" : "NORMAL", g_SessionSkillId, g_SessionHitCount);
+                g_SessionType ? "SKILL" : "NORMAL", g_SessionSkillId, g_SessionHitCount,
+                (int)g_SessionAttackMonsters, (int)g_SessionAttackPlayersAll,
+                (int)g_SessionAttackPlayersClick, (int)g_SessionAttackOthers);
     DebugTools::DumpObjectManager();
 }
 REGISTER_MESSAGE(ATTACK_START, HandleAttackStart);
@@ -551,9 +678,27 @@ static void HandleAttackConfig(const char* payload) {
         g_Config.defaultHitCount = ival;
         g_SessionHitCount = ival;
     }
-    Logger::Log("ATTACK", "CONFIG atualizado: delay=%dms range=%.1f type=%s skill=0x%04X hitcount=%d",
+    if (CommandParams::ParseIntParam(payload, "attackmonsters", &ival)) {
+        g_Config.defaultAttackMonsters = (ival != 0);
+        g_SessionAttackMonsters = (ival != 0) ? 1 : 0;
+    }
+    if (CommandParams::ParseIntParam(payload, "attackplayerall", &ival)) {
+        g_Config.defaultAttackPlayersAll = (ival != 0);
+        g_SessionAttackPlayersAll = (ival != 0) ? 1 : 0;
+    }
+    if (CommandParams::ParseIntParam(payload, "attackplayerclick", &ival)) {
+        g_Config.defaultAttackPlayersClick = (ival != 0);
+        g_SessionAttackPlayersClick = (ival != 0) ? 1 : 0;
+    }
+    if (CommandParams::ParseIntParam(payload, "attackothers", &ival)) {
+        g_Config.defaultAttackOthers = (ival != 0);
+        g_SessionAttackOthers = (ival != 0) ? 1 : 0;
+    }
+    Logger::Log("ATTACK", "CONFIG atualizado: delay=%dms range=%.1f type=%s skill=0x%04X hitcount=%d monsters=%d playersAll=%d playersClick=%d others=%d",
                 g_SessionDelayMs, g_SessionRange,
-                g_SessionType ? "SKILL" : "NORMAL", g_SessionSkillId, g_SessionHitCount);
+                g_SessionType ? "SKILL" : "NORMAL", g_SessionSkillId, g_SessionHitCount,
+                (int)g_SessionAttackMonsters, (int)g_SessionAttackPlayersAll,
+                (int)g_SessionAttackPlayersClick, (int)g_SessionAttackOthers);
 }
 REGISTER_MESSAGE(ATTACK_CONFIG, HandleAttackConfig);
 
@@ -647,9 +792,11 @@ bool Initialize() {
         return false;
     }
 
-    Logger::Log("ATTACK", "Inicializado (default: delay=%dms range=%.1f type=%s hitcount=%d)",
+    Logger::Log("ATTACK", "Inicializado (default: delay=%dms range=%.1f type=%s hitcount=%d monsters=%d playersAll=%d playersClick=%d others=%d)",
                 g_Config.defaultDelayMs, g_Config.defaultRange,
-                g_Config.defaultType ? "SKILL" : "NORMAL", g_Config.defaultHitCount);
+                g_Config.defaultType ? "SKILL" : "NORMAL", g_Config.defaultHitCount,
+                (int)g_Config.defaultAttackMonsters, (int)g_Config.defaultAttackPlayersAll,
+                (int)g_Config.defaultAttackPlayersClick, (int)g_Config.defaultAttackOthers);
     return true;
 }
 

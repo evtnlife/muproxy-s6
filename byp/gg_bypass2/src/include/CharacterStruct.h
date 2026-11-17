@@ -4,8 +4,8 @@
 // ============================================================================
 // CharacterStruct — Offsets da estrutura do personagem no main.exe
 //
-// Endereço base: main.exe + 0xA96B0C (GameAddresses::CHARACTER_PTR)
-// Descoberto via x32dbg memory search pelo nome do personagem.
+// Endereço base: main.exe + 0xA96B00 (GameAddresses::CHARACTER_PTR)
+// Descoberto via x32dbg: o nome "Pkd0r" está em base+0xA96B0C (= base da struct + 0x0C = OFF_NAME).
 //
 // ATENÇÃO: Esta struct NÃO contém level/stats (STR/AGI/VIT/ENE).
 // Level e stats estão em UserObjectStruct (GameAddresses::USER_OBJECT_PTR).

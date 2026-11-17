@@ -14,6 +14,7 @@
 #include <InstanceIdentity.h>
 #include <InstancePorts.h>
 #include <HwidRewrite.h>
+#include <PlayerInfo.h>
 
 static HANDLE g_hInitThread = NULL;
 static LPTOP_LEVEL_EXCEPTION_FILTER g_PrevExceptionFilter = NULL;
@@ -165,6 +166,9 @@ static void SafeInitialize(HMODULE hModule) {
         if (Config::AUTO_POTION_ENABLED) {
             AutoPotion::Initialize();
         }
+
+        // Envia nome/level/mapa do personagem para o MuProxy2 (1x/s)
+        PlayerInfo::Initialize();
     }
 
     // Hook de debug: loga o buffer da skill antes da criptografia/envio
@@ -226,6 +230,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
             if (Config::MONSTER_TRACKER_ENABLED) MonsterTracker::Shutdown();
             if (Config::ATTACK_MODULE_ENABLED) AttackModule::Shutdown();
             if (Config::AUTO_POTION_ENABLED) AutoPotion::Shutdown();
+            PlayerInfo::Shutdown();
             PacketHandler::Shutdown();
             CommandChannel::Shutdown();
             PacketSniffer::Uninstall();

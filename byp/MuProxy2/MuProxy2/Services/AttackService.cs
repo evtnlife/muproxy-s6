@@ -15,9 +15,13 @@ namespace WinFormsMitm.Services
         // ---- Configuração ----
         public int Range { get; set; } = 8;
         public int DelayMs { get; set; } = 800;
-        public int HitCount { get; set; } = 1;     // quantas vezes ataca cada mob por ciclo
+        public int HitCount { get; set; } = 1;     // quantas vezes ataca cada alvo por ciclo
         public int AttackType { get; set; } = 0;   // 0=normal, 1=skill
         public int SkillId { get; set; } = 0;
+        public bool AttackMonsters { get; set; } = true;       // atacar monstros (type 2)
+        public bool AttackPlayersAll { get; set; } = false;    // atacar todos os jogadores (type 1)
+        public bool AttackPlayersClick { get; set; } = false;  // atacar jogador no clique (até sumir)
+        public bool AttackOthers { get; set; } = false;        // atacar outros (não-monstro, não-jogador)
 
         private bool _enabled;
         public bool Enabled
@@ -48,7 +52,11 @@ namespace WinFormsMitm.Services
                 Range = Range,
                 AttackType = AttackType,
                 HitCount = HitCount,
-                SkillId = SkillId
+                SkillId = SkillId,
+                AttackMonsters = AttackMonsters ? 1 : 0,
+                AttackPlayersAll = AttackPlayersAll ? 1 : 0,
+                AttackPlayersClick = AttackPlayersClick ? 1 : 0,
+                AttackOthers = AttackOthers ? 1 : 0
             };
             string wire = msg.ToWire();
 
@@ -82,7 +90,11 @@ namespace WinFormsMitm.Services
                 Range = Range,
                 AttackType = AttackType,
                 HitCount = HitCount,
-                SkillId = SkillId
+                SkillId = SkillId,
+                AttackMonsters = AttackMonsters ? 1 : 0,
+                AttackPlayersAll = AttackPlayersAll ? 1 : 0,
+                AttackPlayersClick = AttackPlayersClick ? 1 : 0,
+                AttackOthers = AttackOthers ? 1 : 0
             };
             _dll.SendCommand(msg.ToWire());
             _log?.Invoke($"[ATK] CONFIG -> {msg.ToWire()}");

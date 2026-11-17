@@ -1,26 +1,30 @@
 [
   {
-    "content": "Explorar o byp: send path, MuCipher (Layer-1), InstanceIdentity/InstancePorts, CommandChannel/MessageRegistry",
+    "content": "C++ AttackModule.h: atualizar AttackConfig (monsters/playersAll/playersClick/others)",
     "status": "completed"
   },
   {
-    "content": "Decidir onde o HWID por instância fica armazenado (derivado da base MUPROXY_BASE)",
+    "content": "C++ AttackModule.cpp: map armazena type, session vars, WatcherThread filter, DispatcherThread, parse",
     "status": "completed"
   },
   {
-    "content": "Implementar detecção do pacote de login (C1 5F F1) e do padrão HWID no payload decifrado",
+    "content": "C# Messages.cs: atualizar AttackStartMessage/AttackConfigMessage",
     "status": "completed"
   },
   {
-    "content": "Implementar reescrita do HWID + re-cifra Layer-1/SM/XorData no send path",
+    "content": "C# AttackService.cs: atualizar propriedades",
     "status": "completed"
   },
   {
-    "content": "Build (build.bat) e verificação do algoritmo (round-trip SM + pipeline completo em Python)",
+    "content": "C# MainForm.Designer.cs: substituir 2 checkboxes pelos novos (Monstro/Player+sub-opções/Outros)",
     "status": "completed"
   },
   {
-    "content": "Teste de campo: abrir 2 instâncias e confirmar que ambas logam (requer o usuário)",
-    "status": "pending"
+    "content": "C# MainForm.cs: ligar novos controles",
+    "status": "completed"
+  },
+  {
+    "content": "Rebuild byp.dll + verificar",
+    "status": "completed"
   }
 ]

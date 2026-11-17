@@ -20,8 +20,8 @@ struct GameAddresses {
     static constexpr uintptr_t OBJ_MANAGER_PTR  = 0xA7C224;  // DWORD* -> Object Manager
     static constexpr uintptr_t OBJ_ARRAY_OFFSET = 0x8;       // offset inside Object Manager
     static constexpr uintptr_t LOCAL_PLAYER_PTR  = 0x7BC4F04; // DWORD* -> local player GameObject
-    static constexpr uintptr_t CHARACTER_PTR     = 0xA96B0C;  // struct direta: nome, classe, skills (NÃO tem level!)
-    static constexpr uintptr_t USER_OBJECT_PTR    = 0x8128AC8; // DWORD* -> user object struct (nome, level, stats)
+    static constexpr uintptr_t CHARACTER_PTR     = 0xA96B00;  // struct direta: nome, classe, skills (NÃO tem level!). Base da struct; nome em +0x0C
+    static constexpr uintptr_t USER_OBJECT_PTR    = 0x7D28AC8; // DWORD* -> user object struct (nome, level, stats). RVA: base+0x7D28AC8 = 0x08128AC8 (absoluto), que contém o ponteiro p/ o UserObject
   static constexpr uintptr_t PARTY_LIST_PTR     = 0x81CB4E8; // DWORD* -> party list (32 bytes/membro; slot 0 = jogador local)
     static constexpr uintptr_t MAP_NUMBER        = 0xA61E18; // DWORD (current map id)
     static constexpr uintptr_t VIEWPORT_WIDTH    = 0xA61E58; // DWORD (pixels)
