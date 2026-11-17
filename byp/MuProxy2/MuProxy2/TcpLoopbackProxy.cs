@@ -34,7 +34,15 @@ namespace WinFormsMitm
             lock (_listenersLock) return _listeners.Any(l => l._listenPort == listenPort);
         }
 
-        public void AddListener(int listenPort, string realHost, int realPort, bool rewriteServerList = false)
+        /// <summary>
+        /// Cria um listener local que faz relay para o servidor real.
+        ///
+        /// listenAddress: o loopback da instância (127.0.0.1 / 127.0.0.2 / ...).
+        /// A PORTA é sempre a do servidor (44411 do CS, a do GS no C116) —
+        /// o que separa as instâncias é o endereço, não a porta.
+        /// </summary>
+        public void AddListener(int listenPort, string realHost, int realPort, bool rewriteServerList = false,
+            bool isGameServer = false, string? listenAddress = null)
         {
             Listener l;
             bool startNow;
@@ -42,7 +50,8 @@ namespace WinFormsMitm
             lock (_listenersLock)
             {
                 if (_listeners.Any(x => x._listenPort == listenPort)) return; // já existe
-                l = new Listener(listenPort, realHost, realPort, rewriteServerList, Log, OnClientToServer, OnServerToClient,
+                l = new Listener(listenPort, realHost, realPort, rewriteServerList, isGameServer, listenAddress,
+                    Log, OnClientToServer, OnServerToClient,
                     port => OnGsPortDetected?.Invoke(port));
                 _listeners.Add(l);
                 startNow = _started;
@@ -91,6 +100,11 @@ namespace WinFormsMitm
             private readonly string _realHost;
             private readonly int _realPort;
             private readonly bool _rewrite;
+            // Loopback onde esta instância escuta (127.0.0.1 / 127.0.0.2 / ...).
+            private readonly string _listenAddress;
+            // Listener do game server: loga o tráfego (greeting/EOF/erro).
+            private readonly bool _isGameServer;
+            private int _gsLogged;
             private readonly Action<string> _log;
             private readonly Action<string, byte[]>? _onC2S;
             private readonly Action<string, byte[]>? _onS2C;
@@ -106,6 +120,7 @@ namespace WinFormsMitm
             public bool IsRunning => _listener != null;
 
             public Listener(int listenPort, string realHost, int realPort, bool rewrite,
+                bool isGameServer, string? listenAddress,
                 Action<string> log, Action<string, byte[]>? onC2S, Action<string, byte[]>? onS2C,
                 Action<int>? onGsPortDetected)
             {
@@ -113,6 +128,8 @@ namespace WinFormsMitm
                 _realHost = realHost;
                 _realPort = realPort;
                 _rewrite = rewrite;
+                _listenAddress = string.IsNullOrWhiteSpace(listenAddress) ? "127.0.0.1" : listenAddress.Trim();
+                _isGameServer = isGameServer;
                 _log = log;
                 _onC2S = onC2S;
                 _onS2C = onS2C;
@@ -152,10 +169,10 @@ namespace WinFormsMitm
             {
                 Stop();
                 _localCts = CancellationTokenSource.CreateLinkedTokenSource(parentCt);
-                _listener = new TcpListener(IPAddress.Loopback, _listenPort);
+                _listener = new TcpListener(IPAddress.Parse(_listenAddress), _listenPort);
                 _listener.Start();
                 _listenTask = Task.Run(ListenLoop, _localCts.Token);
-                _log($"[PROXY] Ouvindo 127.0.0.1:{_listenPort} -> {_realHost}:{_realPort}" + (_rewrite ? " (rewrite server list)" : ""));
+                _log($"[PROXY] Ouvindo {_listenAddress}:{_listenPort} -> {_realHost}:{_realPort}" + (_rewrite ? " (rewrite server list)" : ""));
             }
 
             public void Stop()
@@ -202,7 +219,7 @@ namespace WinFormsMitm
                         server = new TcpClient();
                         await server.ConnectAsync(_realHost, _realPort).WaitAsync(connCts.Token);
 
-                        _log($"[PROXY] Conectado ao servidor real {_realHost}:{_realPort} para cliente 127.0.0.1:{_listenPort}");
+                        _log($"[PROXY] Conectado ao servidor real {_realHost}:{_realPort} para cliente {_listenAddress}:{_listenPort}");
 
                         _clientStream = client.GetStream();
                         _serverStream = server.GetStream();
@@ -244,6 +261,10 @@ namespace WinFormsMitm
                             // Conexoes keepalive/probe (sem trafego) fecham em silencio.
                             if (totalBytes > 0)
                                 _log($"[PROXY] Relay {tag}:{dir}: EOF apos {totalBytes} bytes");
+                            else if (_isGameServer)
+                                _log($"[PROXY] Relay {tag}:{dir}: o servidor fechou a conexao SEM enviar nada — " +
+                                     $"o GS recusou a sessao (limite de conexoes por IP: GameServer.ini -> " +
+                                     $"[GameServerInfo] MaxIpConnection).");
                             break;
                         }
                         totalBytes += read;
@@ -288,10 +309,13 @@ namespace WinFormsMitm
                             }
                         }
 
-                        // Log do trafego do game server para debug
-                        if (tag == "55902")
+                        // Log do trafego do game server para debug: o primeiro
+                        // pacote do GS e o greeting (C1 0C F1 ...). Depois some
+                        // para nao poluir o log com o trafego do jogo.
+                        if (_isGameServer && _gsLogged < 4)
                         {
-                            _log($"[RELAY] {tag}:{dir} len={read} hex={BitConverter.ToString(copy).Replace("-", " ")}");
+                            _gsLogged++;
+                            _log($"[RELAY] GS {tag}:{dir} len={read} hex={BitConverter.ToString(copy).Replace("-", " ")}");
                         }
 
                         if (dir == "C->S")
@@ -302,7 +326,7 @@ namespace WinFormsMitm
                         if (rewrite)
                         {
                             var original = (byte[])copy.Clone();
-                            RewriteServerListPayload(copy, _realHost);
+                            RewriteServerListPayload(copy, _realHost, _listenAddress);
                             if (!copy.SequenceEqual(original))
                             {
                                 _log($"[REWRITE] Server list payload de {original.Length} bytes alterado");
@@ -315,22 +339,29 @@ namespace WinFormsMitm
                     }
                 }
                 catch (OperationCanceledException) { }
-                catch (IOException) { /* conexao encerrada normalmente (teardown) */ }
+                catch (IOException ex)
+                {
+                    // No GS um reset (10054) e o sinal de que o server recusou
+                    // a conexao — tipicamente limite de sessoes por IP.
+                    if (_isGameServer)
+                        _log($"[PROXY] Relay {tag}:{dir}: socket encerrado pelo servidor -> {ex.Message}");
+                }
                 catch (Exception ex)
                 {
                     _log($"[PROXY] Relay {tag}:{dir}: {ex.Message}");
                 }
             }
 
-            private static void RewriteServerListPayload(byte[] data, string realHost)
+            private static void RewriteServerListPayload(byte[] data, string realHost, string listenAddress)
             {
                 var enc = Encoding.GetEncoding("iso-8859-1");
-                string text = enc.GetString(data);
                 // Apenas substitui IPs de servidor (nao DNS, nao mascara, etc.)
-                // O game server real e 54.36.205.234; substituimos exatamente esse IP por 127.0.0.1
+                // O game server real e 54.36.205.234; substituimos exatamente esse IP
+                // pelo loopback desta instancia (127.0.0.1 / .2 / ...), que tem o
+                // mesmo tamanho.
                 var specificIp = realHost.Trim();
                 var srcBytes = enc.GetBytes(specificIp);
-                var dstBytes = enc.GetBytes("127.0.0.1");
+                var dstBytes = enc.GetBytes(listenAddress);
                 if (srcBytes.Length == dstBytes.Length)
                 {
                     for (int i = 0; i <= data.Length - srcBytes.Length; i++)

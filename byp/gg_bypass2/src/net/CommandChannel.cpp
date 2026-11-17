@@ -24,6 +24,8 @@ static bool g_Initialized = false;
 static bool g_WinsockStarted = false;
 static HANDLE g_WorkerThread = NULL;
 static volatile LONG g_Running = 0;
+static volatile LONG g_HelloPending = 0;   // 1 = manda o HELLO na proxima volta
+static ConnectedHandler g_OnConnected = NULL;
 
 static void EnsureWinsock() {
     if (!g_WinsockStarted) {
@@ -80,6 +82,9 @@ static bool DoConnect() {
 
     g_Socket = s;
     Logger::Log("TCPCLIENT", "Conectado ao %s:%d (socket=%d)", g_Host, g_Port, (int)s);
+    // Marca que a conexao é nova: o worker dispara o handler de "conectado"
+    // (handshake HELLO) na proxima volta do laco.
+    InterlockedExchange(&g_HelloPending, 1);
     return true;
 }
 
@@ -87,6 +92,8 @@ static bool DoConnect() {
 static DWORD WINAPI WorkerThread(LPVOID) {
     char buf[8192];
     int bufPos = 0;
+    SOCKET lastSocket = INVALID_SOCKET;
+    bool bomStripped = false;   // vale só para a conexão atual
 
     while (InterlockedCompareExchange(&g_Running, 1, 1) == 1) {
         EnterCriticalSection(&g_Lock);
@@ -99,6 +106,20 @@ static DWORD WINAPI WorkerThread(LPVOID) {
         if (s == INVALID_SOCKET) {
             Sleep(1000); // aguarda antes de tentar reconectar
             continue;
+        }
+
+        // Conexão nova (ou reconexão): o strip do BOM volta ao início.
+        if (s != lastSocket) {
+            lastSocket = s;
+            bomStripped = false;
+            bufPos = 0;
+        }
+
+        // Handshake de identidade: na primeira volta depois de conectar,
+        // avisa o MuProxy2 quem e este byp (PID + base da instancia).
+        if (InterlockedCompareExchange(&g_HelloPending, 0, 0) == 1 && g_OnConnected) {
+            InterlockedExchange(&g_HelloPending, 0);
+            g_OnConnected();
         }
 
         fd_set readSet;
@@ -128,9 +149,6 @@ static DWORD WINAPI WorkerThread(LPVOID) {
         }
         tmp[r] = '\0';
 
-        // Strip BOM (EF BB BF) se presente no inicio do stream
-        static bool bomStripped = false;
-
         for (int i = 0; i < r; i++) {
             // Pula BOM bytes no inicio
             if (!bomStripped) {
@@ -141,6 +159,12 @@ static DWORD WINAPI WorkerThread(LPVOID) {
             }
             if (tmp[i] == '\n') {
                 buf[bufPos] = '\0';
+                // A UI envia "\r\n": tira o '\r' do fim, senao a tag da
+                // mensagem nunca casa no MessageRegistry.
+                if (bufPos > 0 && buf[bufPos - 1] == '\r') {
+                    bufPos--;
+                    buf[bufPos] = '\0';
+                }
                 if (bufPos > 0) {
                     PacketHandler::ProcessLine(buf, bufPos);
                 }
@@ -260,6 +284,10 @@ void Reconnect() {
     CloseSocket();
     DoConnect();
     LeaveCriticalSection(&g_Lock);
+}
+
+void SetOnConnectedHandler(ConnectedHandler handler) {
+    g_OnConnected = handler;
 }
 
 } // namespace CommandChannel

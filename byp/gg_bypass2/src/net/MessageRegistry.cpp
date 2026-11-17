@@ -36,13 +36,17 @@ void Dispatch(const char* line, int len) {
     for (int i = 0; i < len; ++i) {
         if (line[i] == '|') { sep = line + i; break; }
     }
-    if (!sep) {
-        Logger::Log("MSGREG", "Linha sem separador '|': %.*s", len, line);
-        return;
-    }
 
-    int tagLen = (int)(sep - line);
-    const char* payload = sep + 1;
+    int tagLen;
+    const char* payload;
+    if (sep) {
+        tagLen = (int)(sep - line);
+        payload = sep + 1;
+    } else {
+        // Linha sem payload: a tag e a linha inteira (ex.: "POTION_STATUS").
+        tagLen = len;
+        payload = line + len;
+    }
 
     // Busca linear — poucos tipos, não vale hash map
     for (int i = 0; i < g_EntryCount; ++i) {
@@ -52,7 +56,7 @@ void Dispatch(const char* line, int len) {
         }
     }
 
-    Logger::Log("MSGREG", "Tag desconhecido: %.*s", tagLen, line);
+    Logger::Log("MSGREG", "Tag desconhecida: %.*s", tagLen, line);
 }
 
 void Initialize() {

@@ -31,6 +31,23 @@ bool IsGameServerPort(int port);
 bool IsGameServerSocket(SOCKET s);
 
 // ============================================================================
+// Peer REAL (destino original antes do redirecionamento para 127.0.0.1).
+//
+// O cliente valida LOCALMENTE o peer do socket: em Main.dll+0xBB170 ele chama
+// getpeername e classifica o socket pela porta do peer (faixa 45901..55950),
+// e o chamador (Main.dll+0xBB300) usa o resultado para cifrar o pacote do GS.
+//
+// Com o proxy, o peer viraria 127.0.0.1:<porta local> — e a porta local so
+// coincide com a real na instancia base 0 (45901). Nas outras instancias a
+// validacao local falha e o cliente trava na tela de selecao de sala.
+//
+// Guardamos o destino original no hook de connect para devolver ao cliente o
+// peer verdadeiro (o mesmo que ele veria sem o MuProxy2).
+// ============================================================================
+void RememberRealPeer(SOCKET s, const char* host, int port);
+bool GetRealPeer(SOCKET s, char* host, int hostLen, int* port);
+
+// ============================================================================
 // Detecção por DADOS (o hook de connect redireciona o jogo para 127.0.0.1,
 // então getpeername devolve a porta do MuProxy2 e a heurística por porta
 // não identifica o socket do GS).

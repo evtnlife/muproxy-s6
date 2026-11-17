@@ -12,6 +12,7 @@
 #include "OriginalApi.h"
 #include "PacketInjector.h"
 #include "Config.h"
+#include "InstancePorts.h"
 #include "Logger.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -54,7 +55,7 @@ static bool OpenSocket()
 
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons((u_short)Config::PACKET_SNIFFER_TCP_PORT);
+    addr.sin_port = htons((u_short)InstancePorts::PacketPort());
     inet_pton(AF_INET, Config::PACKET_SNIFFER_TCP_HOST, &addr.sin_addr);
 
     // Connect ORIGINAL (fora do hook): o hook reescreve o endereço e loga a
@@ -74,7 +75,7 @@ static bool OpenSocket()
         {
             lastFailLog = now;
             Logger::Log("PACKETSNIFFER", "Falha ao conectar %s:%d (err=%d)",
-                        Config::PACKET_SNIFFER_TCP_HOST, Config::PACKET_SNIFFER_TCP_PORT, err);
+                        Config::PACKET_SNIFFER_TCP_HOST, InstancePorts::PacketPort(), err);
         }
         return false;
     }
@@ -83,7 +84,7 @@ static bool OpenSocket()
     ioctlsocket(s, FIONBIO, &mode);
     g_Socket = s;
     Logger::Log("PACKETSNIFFER", "Conectado ao MuProxy2 via TCP %s:%d",
-                Config::PACKET_SNIFFER_TCP_HOST, Config::PACKET_SNIFFER_TCP_PORT);
+                Config::PACKET_SNIFFER_TCP_HOST, InstancePorts::PacketPort());
     return true;
 }
 
@@ -252,7 +253,7 @@ bool Initialize()
     g_RecvThread = CreateThread(NULL, 0, RecvThread, NULL, 0, NULL);
 
     Logger::Log("PACKETSNIFFER", "Canal de pacotes iniciado (%s:%d)",
-                Config::PACKET_SNIFFER_TCP_HOST, Config::PACKET_SNIFFER_TCP_PORT);
+                Config::PACKET_SNIFFER_TCP_HOST, InstancePorts::PacketPort());
     return true;
 }
 

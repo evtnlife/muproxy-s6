@@ -48,15 +48,9 @@ public class PacketLogDecryptionTests
     [Fact]
     public void Decrypt_All_Packets_And_Classify()
     {
-        var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "byp_packets.log");
-        if (!File.Exists(logPath))
-        {
-            // Fallback para o backup original se o linked file nao foi copiado
-            logPath = @"F:\blackrockmu\logs_backup_2026-08-05\byp_packets.log";
-        }
-
-        Assert.True(File.Exists(logPath), $"Log nao encontrado: {logPath}");
-
+        var logPath = TestLogLocator.Find();
+        if (logPath == null) return;   // sem log de captura: nada a analisar
+  
         var entries = PacketLogParser.Parse(logPath);
         Assert.NotEmpty(entries);
 

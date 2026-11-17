@@ -153,6 +153,55 @@ bool IsGameServerSocket(SOCKET s)
 }
 
 // ============================================================================
+// Peer REAL de cada socket redirecionado para 127.0.0.1.
+// (ver o comentario em GameServerConnection.h)
+// ============================================================================
+#define MAX_REAL_PEERS 32
+struct RealPeerInfo { SOCKET s; char host[64]; int port; bool used; };
+static RealPeerInfo g_RealPeers[MAX_REAL_PEERS];
+
+void RememberRealPeer(SOCKET s, const char* host, int port)
+{
+    if (s == INVALID_SOCKET || !host || !host[0] || port <= 0) return;
+
+    for (int i = 0; i < MAX_REAL_PEERS; ++i)
+    {
+        if (g_RealPeers[i].used && g_RealPeers[i].s == s)
+        {
+            strncpy_s(g_RealPeers[i].host, sizeof(g_RealPeers[i].host), host, _TRUNCATE);
+            g_RealPeers[i].port = port;
+            return;
+        }
+    }
+    for (int i = 0; i < MAX_REAL_PEERS; ++i)
+    {
+        if (!g_RealPeers[i].used)
+        {
+            g_RealPeers[i].used = true;
+            g_RealPeers[i].s = s;
+            strncpy_s(g_RealPeers[i].host, sizeof(g_RealPeers[i].host), host, _TRUNCATE);
+            g_RealPeers[i].port = port;
+            return;
+        }
+    }
+}
+
+bool GetRealPeer(SOCKET s, char* host, int hostLen, int* port)
+{
+    for (int i = 0; i < MAX_REAL_PEERS; ++i)
+    {
+        if (g_RealPeers[i].used && g_RealPeers[i].s == s)
+        {
+            if (host && hostLen > 0)
+                strncpy_s(host, (size_t)hostLen, g_RealPeers[i].host, _TRUNCATE);
+            if (port) *port = g_RealPeers[i].port;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================================
 // SendToGameServer — envia bytes JÁ CIFRADOS no socket do game server.
 // É o transporte do PacketInjector. O socket do jogo está conectado ao
 // MuProxy2, que faz relay puro para o GS real.

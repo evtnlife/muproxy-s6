@@ -1,26 +1,26 @@
 [
   {
-    "content": "Diagnosticar por que o auto-potion só 'pegava' após clicar em Aplicar",
+    "content": "Explorar o byp: send path, MuCipher (Layer-1), InstanceIdentity/InstancePorts, CommandChannel/MessageRegistry",
     "status": "completed"
   },
   {
-    "content": "Remover o botão 'Aplicar' — o checkbox vira a fonte da verdade (debounce 400ms → POTION_APPLY / POTION_STOP)",
+    "content": "Decidir onde o HWID por instância fica armazenado (derivado da base MUPROXY_BASE)",
     "status": "completed"
   },
   {
-    "content": "Reaplicar o estado quando o byp.dll reconecta (o módulo volta do zero com o jogo)",
+    "content": "Implementar detecção do pacote de login (C1 5F F1) e do padrão HWID no payload decifrado",
     "status": "completed"
   },
   {
-    "content": "Resync quando o POTION_STATE diz active=0 com o checkbox marcado",
+    "content": "Implementar reescrita do HWID + re-cifra Layer-1/SM/XorData no send path",
     "status": "completed"
   },
   {
-    "content": "byp: POTION_APPLY não descarta mais mensagem (debounce de 1s engolia config legítima)",
+    "content": "Build (build.bat) e verificação do algoritmo (round-trip SM + pipeline completo em Python)",
     "status": "completed"
   },
   {
-    "content": "Build byp.dll + MuProxy2, reiniciar o app e conferir a UI (sem botão Aplicar)",
-    "status": "completed"
+    "content": "Teste de campo: abrir 2 instâncias e confirmar que ambas logam (requer o usuário)",
+    "status": "pending"
   }
 ]

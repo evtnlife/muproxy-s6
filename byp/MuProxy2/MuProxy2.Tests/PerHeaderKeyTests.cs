@@ -28,7 +28,8 @@ public class PerHeaderKeyTests
     [Fact]
     public void Apply_Per_Header_Keys_And_Generate_Report()
     {
-        var logPath = @"F:\blackrockmu\logs_backup_2026-08-05\byp_packets.log";
+        var logPath = TestLogLocator.Find();
+        if (logPath == null) return;   // sem log de captura: nada a analisar
         var entries = PacketLogParser.Parse(logPath);
 
         var report = new StringBuilder();

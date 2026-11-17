@@ -13,6 +13,12 @@
     "Resposta obrigatória em português",
     "Não deixar .cpp solto na raiz de src; cada namespace em arquivo próprio, com headers em src/include",
     "Criar um enum para os opcodes, organizado por direção, para não ficar perdido no ar o que é cada opcode",
-    "nao faca comit"
+    "nao faca comit",
+    "Não faça commit de nada.",
+    "O mesmo MuProxy2.exe deve poder ser aberto múltiplas vezes, com cada main.exe isolado em seu próprio MuProxy.",
+    "Não use tabela de instâncias nem LED; identifique cada main.exe pelo título da janela.",
+    "Não deixar .cpp solto: cada namespace em seu próprio arquivo",
+    "Manter headers em src/include e .cpp/.asm organizados por módulo",
+    "Usar variáveis de ambiente para handshake entre MuProxy2 e byp.dll (MUPROXY_BASE, MUPROXY_HWID, MUPROXY_SESSION)"
   ]
 }

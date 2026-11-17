@@ -16,9 +16,9 @@ public class BruteForceAlgorithmTests
     [Fact]
     public void Find_Algorithm_For_All_Packets()
     {
-        var logPath = @"F:\blackrockmu\logs_backup_2026-08-05\byp_packets.log";
-        Assert.True(File.Exists(logPath));
-
+        var logPath = TestLogLocator.Find();
+        if (logPath == null) return;   // sem log de captura: nada a analisar
+  
         var entries = PacketLogParser.Parse(logPath);
         Assert.NotEmpty(entries);
 

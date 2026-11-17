@@ -26,7 +26,9 @@
     <ProjectReference Include="..\MuProxy2\MuProxy2.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- O log de captura (byp_packets.log) e um artefato de analise: pode nao
+       existir. Sem a condicao, o MSBuild quebra o build com MSB3030. -->
+  <ItemGroup Condition="Exists('..\..\..\logs_backup_2026-08-05\byp_packets.log')">
     <None Include="..\..\..\logs_backup_2026-08-05\byp_packets.log" Link="byp_packets.log">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

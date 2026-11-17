@@ -39,4 +39,10 @@ bool IsConnected();
 // Fecha e reconecta
 void Reconnect();
 
+// Callback disparado depois que o canal conecta (e a cada reconexão).
+// Usado para o handshake de identidade da instância (HELLO): o MuProxy2
+// precisa saber PID/base do byp antes de aceitar comandos dele.
+typedef void (*ConnectedHandler)();
+void SetOnConnectedHandler(ConnectedHandler handler);
+
 } // namespace CommandChannel

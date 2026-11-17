@@ -8,6 +8,12 @@
 #include <AttackModule.h>
 #include <AutoPotion.h>
 #include <SkillHook.h>
+#include <ClientHooks.h>
+#include <ClientPatches.h>
+#include <GameMemory/Globals.h>
+#include <InstanceIdentity.h>
+#include <InstancePorts.h>
+#include <HwidRewrite.h>
 
 static HANDLE g_hInitThread = NULL;
 static LPTOP_LEVEL_EXCEPTION_FILTER g_PrevExceptionFilter = NULL;
@@ -118,6 +124,19 @@ static void InitializeLogging(HMODULE hModule) {
     if (logPath[0] == '\0') {
         strcpy_s(logPath, sizeof(logPath), Config::LOG_FILENAME);
     }
+    // Instância > 0: o log vai para a pasta da sessão (MUPROXY_SESSION), senão
+    // as duas instâncias escreveriam no mesmo arquivo.
+    const char* session = InstancePorts::SessionDir();
+    if (session && session[0]) {
+        char sessionLog[MAX_PATH] = {0};
+        strncpy_s(sessionLog, sizeof(sessionLog), session, _TRUNCATE);
+        size_t len = strlen(sessionLog);
+        if (len > 0 && sessionLog[len - 1] != '\\')
+            strcat_s(sessionLog, sizeof(sessionLog), "\\");
+        strcat_s(sessionLog, sizeof(sessionLog), Config::LOG_FILENAME);
+        Logger::Initialize(sessionLog);
+        return;
+    }
     Logger::Initialize(logPath);
 }
 
@@ -134,7 +153,7 @@ static void SafeInitialize(HMODULE hModule) {
 
     // Inicializa TCP client e módulos de comunicação com MuProxy2
     if (Config::PACKET_SNIFFER_ENABLED || Config::MONSTER_TRACKER_ENABLED || Config::ATTACK_MODULE_ENABLED) {
-        CommandChannel::Initialize(Config::TCP_HOST, Config::TCP_PORT);
+        CommandChannel::Initialize(Config::TCP_HOST, InstancePorts::CommandPort());
         PacketHandler::Initialize();
 
         if (Config::MONSTER_TRACKER_ENABLED) {
@@ -150,10 +169,24 @@ static void SafeInitialize(HMODULE hModule) {
 
     // Hook de debug: loga o buffer da skill antes da criptografia/envio
     SkillHook::Install();
-}
+
+    // Identidade da instância: o byp se apresenta ao MuProxy2 (PID + base)
+    // logo depois de conectar no canal de comandos. É o que impede um jogo de
+    // cair no MuProxy2 de outra instância.
+    InstanceIdentity::Initialize();
+
+    // Reescrita de HWID no pacote de login (um HWID por instância).
+    HwidRewrite::Initialize();
+
+    // Vigia o carregamento do Main.dll: aplica os patches do cliente
+    // (neutralização da checagem de instância única) no instante em que o
+    // módulo entra.
+    ClientHooks::Initialize();
+    }
 
 static DWORD WINAPI InitThreadProc(LPVOID lpParam) {
     SafeInitialize((HMODULE)lpParam);
+
     return 0;
 }
 

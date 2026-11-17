@@ -31,6 +31,9 @@ private long _lastPotionResyncTicks;
 
         private TcpLoopbackProxy? _proxy;
 
+        // Portas desta instância (base 0 = comportamento de hoje).
+        private readonly InstanceAllocator _instance;
+
         HashSet<string> bypassed = new HashSet<string>();
 
         const string GMO_PATH_DEFAULT = @"F:\blackrockmu\main.exe";
@@ -126,8 +129,8 @@ private long _lastPotionResyncTicks;
     // Estado do auto-potion (vem do byp.dll pelo canal de comandos, 1x/s).
     _dll.OnPotionState += st =>
     {
-        if (InvokeRequired) { BeginInvoke(() => UpdatePotionState(st)); return; }
-        UpdatePotionState(st);
+    if (InvokeRequired) { BeginInvoke(() => UpdatePotionState(st)); return; }
+    UpdatePotionState(st);
     };
 
             SetupLogFilters();
@@ -135,6 +138,16 @@ private long _lastPotionResyncTicks;
             LogPacketCatalogStatus();
             SetupAttackControls();
             SetupPotionControls();
+
+            // Instância isolada: esta janela cuida de UM main.exe e usa portas
+            // próprias (base 0 = exatamente o comportamento de hoje).
+            // Fica DEPOIS de SetupLogFilters() porque o log do alocador passa
+            // pelos filtros de log (que só existem a partir dali).
+            _instance = InstanceAllocator.Allocate(msg => Log(new LogEvent(DateTime.Now, msg)));
+            _instance.ExportToEnvironment();
+            Text = $"MuProxy2 — base {_instance.Base}";
+            LoadAccount();
+
             StartHookServer();
 
             // Timer para throttle do RebuildLogUI
@@ -698,12 +711,16 @@ private long _lastPotionResyncTicks;
 
         private bool ShouldShowLog(string msg)
         {
-            if (msg.Contains("[HOOK]")) return chkHook.Checked;
-            if (msg.Contains("[RAW]")) return chkRaw.Checked;
-            if (msg.Contains("[SEND]")) return chkSend.Checked;
-            if (msg.Contains("[MON]")) return chkMon.Checked;
-            if (msg.Contains("[ATK]")) return chkAtk.Checked;
-            return chkOther.Checked;
+            // Os checkboxes de filtro só existem depois de SetupLogFilters();
+            // antes disso (ex.: durante a alocação da instância, no construtor)
+            // ainda são null — nesse caso mostra a linha.
+            static bool IsChecked(CheckBox? cb) => cb?.Checked ?? true;
+            if (msg.Contains("[HOOK]")) return IsChecked(chkHook);
+            if (msg.Contains("[RAW]")) return IsChecked(chkRaw);
+            if (msg.Contains("[SEND]")) return IsChecked(chkSend);
+            if (msg.Contains("[MON]")) return IsChecked(chkMon);
+            if (msg.Contains("[ATK]")) return IsChecked(chkAtk);
+            return IsChecked(chkOther);
         }
 
         private void LogPacketCatalogStatus()
@@ -844,7 +861,7 @@ private long _lastPotionResyncTicks;
 
         private void StartHookServer()
         {
-            _hookListener?.Start();
+            _hookListener?.Start(_instance.CmdPort, _instance.PktPort, _instance.Base);
             // Ativa scan de monstros no byp.dll após conexão
             _dll!.OnDllConnected += () =>
             {
@@ -903,7 +920,10 @@ private long _lastPotionResyncTicks;
 
             _proxy = new TcpLoopbackProxy();
             _proxy.OnLog += msg => Log(new LogEvent(DateTime.Now, $"[PROXY] {msg}"));
-            _proxy.AddListener(_serverListPort, _serverHost, _serverListPort, rewriteServerList: true);
+            // O proxy do CS escuta na PORTA DO SERVIDOR (44411) mas no loopback
+            // desta instância — a porta do servidor nunca muda.
+            _proxy.AddListener(_instance.LoginPort, _serverHost, _serverListPort, rewriteServerList: true,
+                listenAddress: _instance.LocalIp);
 
             // C116 (ConnectToServer) revela a porta real do GS quando o login
             // server a envia. Cria o listener do GS dinamicamente nesse momento
@@ -911,11 +931,13 @@ private long _lastPotionResyncTicks;
             var proxyRef = _proxy;
             proxyRef.OnGsPortDetected += gsPort =>
             {
-                if (proxyRef.HasListener(gsPort)) return;
-                proxyRef.AddListener(gsPort, _serverHost, gsPort, rewriteServerList: false);
-                Log(new LogEvent(DateTime.Now, $"[PROXY] GS: listener criado 127.0.0.1:{gsPort} -> {_serverHost}:{gsPort}"));
-                var status = $"Status: 127.0.0.1:{_serverListPort} -> {_serverHost}:{_serverListPort} | GS 127.0.0.1:{gsPort} -> {_serverHost}:{gsPort} (auto)";
-                if (InvokeRequired) BeginInvoke(() => lblStatus.Text = status);
+            int localGs = _instance.GsPort(gsPort);
+            if (proxyRef.HasListener(localGs)) return;
+            proxyRef.AddListener(localGs, _serverHost, gsPort, rewriteServerList: false, isGameServer: true,
+                listenAddress: _instance.LocalIp);
+            Log(new LogEvent(DateTime.Now, $"[PROXY] GS: listener criado {_instance.LocalIp}:{localGs} -> {_serverHost}:{gsPort}"));
+            var status = $"Status: {_instance.LocalIp}:{_instance.LoginPort} -> {_serverHost}:{_serverListPort} | GS {_instance.LocalIp}:{localGs} -> {_serverHost}:{gsPort} (auto)";
+            if (InvokeRequired) BeginInvoke(() => lblStatus.Text = status);
                 else lblStatus.Text = status;
             };
 
@@ -923,8 +945,8 @@ private long _lastPotionResyncTicks;
             {
                 _proxy.Start();
                 btnStart.Text = "Stop Proxy";
-                lblStatus.Text = $"Status: 127.0.0.1:{_serverListPort} -> {_serverHost}:{_serverListPort} | GS: aguardando C116 (auto)";
-                Log(new LogEvent(DateTime.Now, $"[PROXY] Iniciado: ServerList=127.0.0.1:{_serverListPort}, GS=auto (C116)"));
+                lblStatus.Text = $"Status: {_instance.LocalIp}:{_instance.LoginPort} -> {_serverHost}:{_serverListPort} | GS: aguardando C116 (auto)";
+                Log(new LogEvent(DateTime.Now, $"[PROXY] Iniciado: ServerList={_instance.LocalIp}:{_instance.LoginPort}, GS=auto (C116)"));
             }
             catch (Exception ex)
             {
@@ -948,6 +970,29 @@ private long _lastPotionResyncTicks;
 
         private bool _launching = false;
 
+        // Conta/senha do auto-login desta instância. Cada instância tem a sua
+        // conta — gravada no Settings.ini da pasta da sessão.
+        private string _accountUser = "";
+        private string _accountPass = "";
+
+        // PID do main.exe que ESTA instância lançou (para não derrubar o
+        // jogo das outras instâncias).
+        private int _ownGamePid;
+
+        private void KillOwnGame()
+        {
+            if (_ownGamePid == 0) return;
+            try
+            {
+                var p = Process.GetProcessById(_ownGamePid);
+                p.Kill();
+                p.WaitForExit(2000);
+                Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe anterior desta instância encerrado (PID={_ownGamePid})"));
+            }
+            catch { }
+            _ownGamePid = 0;
+        }
+
         private void btnLaunch_Click(object? sender, EventArgs e)
         {
             if (_launching) return;
@@ -963,17 +1008,45 @@ private long _lastPotionResyncTicks;
                 if (!File.Exists(exePath))
                 { Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe não encontrado: {exePath}")); return; }
 
-                foreach (var p in Process.GetProcessesByName("main"))
-                { try { p.Kill(); } catch { } }
+                // Mata APENAS o main.exe que ESTA instância lançou — as outras
+                // instâncias têm o jogo delas e não podem ser derrubadas.
+                KillOwnGame();
+
+                // Pasta de sessão: cada instância tem o seu CWD (e portanto o
+                // seu Settings.ini => conta própria do auto-login). As pastas
+                // de dados do jogo são junções para as originais.
+                string sessionDir = SessionFolder.Prepare(exeDir, _instance.Base);
+
+                // O main.exe filho herda a base de portas (e a pasta da sessão)
+                // pela variável de ambiente — o byp.dll lê no attach.
+                _instance.ExportToEnvironment(sessionDir: sessionDir);
+
+                Log(new LogEvent(DateTime.Now,
+                    $"[SESSAO] pasta da instância (base {_instance.Base}): {sessionDir}"));
+
+                // A conta do auto-login vai no Settings.ini DA SESSÃO: o
+                // cliente lê ".\Settings.ini" relativo ao CWD, que agora é a
+                // pasta da sessão. Sem conta própria, o servidor derruba a
+                // segunda conta da mesma máquina.
+                if (_accountUser.Length > 0)
+                {
+                    bool ok = SessionFolder.WriteAutoLogin(sessionDir, _accountUser, _accountPass);
+                    Log(new LogEvent(DateTime.Now,
+                        $"[SESSAO] conta do auto-login: {_accountUser}" + (ok ? "" : " (FALHOU)")));
+                }
 
                 var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>() };
                 if (!CreateProcess(exePath, $"\"{exePath}\"", IntPtr.Zero, IntPtr.Zero, false,
-                    0, IntPtr.Zero, exeDir, ref si, out var pi))
+                    0, IntPtr.Zero, sessionDir, ref si, out var pi))
                 {
                     Log(new LogEvent(DateTime.Now, $"[LAUNCH] CreateProcess falhou: {Marshal.GetLastWin32Error()}"));
                     return;
                 }
-                Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe iniciado — PID={pi.dwProcessId}"));
+                _ownGamePid = pi.dwProcessId;
+                // O handshake HELLO valida o PID: um byp que se conectar nesta
+                // janela com outro PID é de outra instância e é recusado.
+                if (_hookListener != null) _hookListener.ExpectedGamePid = _ownGamePid;
+                Log(new LogEvent(DateTime.Now, $"[LAUNCH] main.exe iniciado — PID={pi.dwProcessId} (base {_instance.Base}, sessao={sessionDir})"));
                 CloseHandle(pi.hThread);
                 CloseHandle(pi.hProcess);
             }
@@ -1044,5 +1117,67 @@ private long _lastPotionResyncTicks;
 
         private void btnBypassPkt_Click(object sender, EventArgs e) => bypassed.Add(txtPacket.Text);
         private void cbC4_CheckedChanged(object sender, EventArgs e) { }
+
+        // ============ Conta do auto-login (por instância) ============
+
+        // Fica salvo por instância (arquivo ao lado do exe), para sobreviver a
+        // fechar/reabrir a janela.
+        private string AccountFile =>
+            Path.Combine(AppContext.BaseDirectory, $"muproxy_account_{_instance.Base}.txt");
+
+        private void LoadAccount()
+        {
+            try
+            {
+                if (!File.Exists(AccountFile)) return;
+                string saved = File.ReadAllText(AccountFile);
+                int sep = saved.IndexOf('|');
+                if (sep <= 0) return;
+                _accountUser = saved.Substring(0, sep);
+                _accountPass = saved.Substring(sep + 1);
+                txtAccount.Text = _accountUser;
+                txtPassword.Text = _accountPass;
+                Log(new LogEvent(DateTime.Now, $"[SESSAO] conta carregada: {_accountUser}"));
+            }
+            catch { }
+        }
+
+        private void SaveAccount()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_accountUser)) File.Delete(AccountFile);
+                else File.WriteAllText(AccountFile, $"{_accountUser}|{_accountPass}");
+            }
+            catch { }
+        }
+
+        private void btnAccountApply_Click(object sender, EventArgs e)
+        {
+            _accountUser = txtAccount.Text.Trim();
+            _accountPass = txtPassword.Text;
+            SaveAccount();
+
+            // Aplica na pasta da sessão (se ela já existir) e no próximo launch.
+            string dir = CurrentSessionDir();
+            bool ok = dir.Length > 0 && SessionFolder.WriteAutoLogin(dir, _accountUser, _accountPass);
+            Log(new LogEvent(DateTime.Now,
+                _accountUser.Length == 0
+                    ? "[SESSAO] conta limpa (o Settings.ini da sessão volta a valer)"
+                    : $"[SESSAO] conta da instância: {_accountUser}" + (ok ? $" (gravada em {dir})" : " (vale a partir do próximo launch)")));
+        }
+
+        // Pasta da sessão da instância (a mesma que o launch vai usar).
+        private string CurrentSessionDir()
+        {
+            try
+            {
+                string exePath = string.IsNullOrWhiteSpace(txtExePath.Text) ? _exePath : txtExePath.Text.Trim();
+                string gameDir = Path.GetDirectoryName(exePath) ?? "";
+                if (gameDir.Length == 0) return "";
+                return Path.Combine(gameDir, "sessions", "base" + _instance.Base);
+            }
+            catch { return ""; }
+        }
     }
 }

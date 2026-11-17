@@ -14,6 +14,9 @@
 #include "StackTrace.h"
 #include "GameServerConnection.h"
 #include "C3Decoder.h"
+#include "InstanceIdentity.h"
+#include "InstancePorts.h"
+#include "HwidRewrite.h"
 #include "OriginalApi.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -39,6 +42,7 @@ static int (WINAPI* TrueConnect)(SOCKET s, const sockaddr* name, int namelen) = 
 static int (WINAPI* TrueWSAConnect)(SOCKET s, const sockaddr* name, int namelen,
     LPWSABUF callerData, LPWSABUF calleeData,
     LPQOS sqos, LPQOS gqos) = nullptr;
+static int (WINAPI* TrueGetPeerName)(SOCKET s, sockaddr* name, int* namelen) = nullptr;
 
 // Forward: completion routine wrapper (definida após HookWSARecv)
 static void CALLBACK OverlappedRecvCompletion(DWORD dwError, DWORD cbTransferred,
@@ -84,10 +88,23 @@ static bool g_OverlappedInit = false;
 // ============================================================================
 static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
 {
+    const char* sendBuf = buf;
+    int sendLen = len;
+    char hwBuf[4096];
+
     if (buf && len > 0) {
         // Pula texto ASCII (comandos INJECT etc)
         if (buf[0] >= 0x20 && buf[0] < 0x7F) {
             return TrueSend(s, buf, len, flags);
+        }
+
+        // Reescreve o HWID no pacote de login (se for o caso). O pacote
+        // reescrito tem o mesmo tamanho do original (HWID = 36 bytes fixos).
+        // Fail-safe: se algo falhar, envia o original.
+        int hwLen = 0;
+        if (HwidRewrite::RewriteIfLogin(buf, len, hwBuf, (int)sizeof(hwBuf), &hwLen)) {
+            sendBuf = hwBuf;
+            sendLen = hwLen;
         }
 
         // Fallback: se o socket do GS ainda nao foi capturado pelo connect,
@@ -112,13 +129,13 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
         // para 127.0.0.1 e a porta real pode estar fora do range) — quem
         // identifica é o CONTEÚDO: um pacote MU decifrado tem header válido.
         bool isGS = GameServerConnection::IsGameServerSocket(s) ||
-                    GameServerConnection::MarkIfGameServerSocket(s, (const uint8_t*)buf, len);
+                    GameServerConnection::MarkIfGameServerSocket(s, (const uint8_t*)sendBuf, sendLen);
         char decBuf[4096];
-        const char* displayBuf = buf;
-        int displayLen = len;
+        const char* displayBuf = sendBuf;
+        int displayLen = sendLen;
         if (isGS) {
-            int copyLen = len < (int)sizeof(decBuf) ? len : (int)sizeof(decBuf);
-            memcpy(decBuf, buf, copyLen);
+            int copyLen = sendLen < (int)sizeof(decBuf) ? sendLen : (int)sizeof(decBuf);
+            memcpy(decBuf, sendBuf, copyLen);
             unsigned char xorKey = 0, subKey = 0;
             MuCipher::GetGameServerKeys(&xorKey, &subKey);
             MuCipher::FullDecrypt(decBuf, copyLen, xorKey, subKey);
@@ -154,10 +171,10 @@ static int WINAPI HookSend(SOCKET s, const char* buf, int len, int flags)
             C3Decoder::LogDecoded(displayBuf, displayLen);
         }
 
-        if (g_PacketObserver) g_PacketObserver("SEND", s, buf, len);
+        if (g_PacketObserver) g_PacketObserver("SEND", s, sendBuf, sendLen);
     }
 
-    return TrueSend(s, buf, len, flags);
+    return TrueSend(s, sendBuf, sendLen, flags);
 }
 
 static int WINAPI HookRecv(SOCKET s, char* buf, int len, int flags)
@@ -294,6 +311,43 @@ static int WINAPI HookRecvFrom(SOCKET s, char* buf, int len, int flags,
     return r;
 }
 
+// ============================================================================
+// getpeername — TRANSPARENCIA DO PROXY.
+//
+// O cliente valida LOCALMENTE o peer do socket: em Main.dll+0xBB170 ele chama
+// getpeername e classifica o socket pela porta do peer (faixa 45901..55950),
+// e o chamador (Main.dll+0xBB300) usa o resultado para cifrar o pacote do GS.
+//
+// Como o byp redireciona o connect para 127.0.0.1:<porta local>, o cliente
+// veria um peer que nao e o servidor real. Na instancia base 0 a porta local
+// coincide com a real (45901) e passa por acaso; nas outras (45901+base) a
+// validacao local falha e o cliente trava na selecao de sala.
+//
+// Devolvemos o peer VERDADEIRO (o destino original do connect) — exatamente o
+// que o cliente veria sem o MuProxy2.
+// ============================================================================
+static int WINAPI HookGetPeerName(SOCKET s, sockaddr* name, int* namelen)
+{
+    int r = TrueGetPeerName(s, name, namelen);
+    if (r == 0 && name && namelen && *namelen >= (int)sizeof(sockaddr_in))
+    {
+        sockaddr_in* a = (sockaddr_in*)name;
+        if (a->sin_family == AF_INET)
+        {
+            char host[64] = {0};
+            int port = 0;
+            if (GameServerConnection::GetRealPeer(s, host, sizeof(host), &port) && host[0] && port > 0)
+            {
+                a->sin_addr.s_addr = inet_addr(host);
+                a->sin_port = htons((u_short)port);
+                Logger::Log("PACKETSNIFFER", "getpeername: peer mascarado -> %s:%d (socket %d)",
+                            host, port, (int)s);
+            }
+        }
+    }
+    return r;
+}
+
 static int WINAPI HookConnect(SOCKET s, const sockaddr* name, int namelen)
 {
     if (name && namelen >= sizeof(sockaddr_in))
@@ -302,7 +356,24 @@ static int WINAPI HookConnect(SOCKET s, const sockaddr* name, int namelen)
         char ip[16];
         strncpy_s(ip, inet_ntoa(target.sin_addr), 15);
         int port = ntohs(target.sin_port);
+
+        // ISOLAMENTO DE INSTÂNCIA: se o MuProxy2 recusou este byp no
+        // handshake HELLO, este main.exe pertence a OUTRA janela do MuProxy2.
+        // Deixar a conexão passar faria o jogo usar o proxy alheio (o
+        // "MuProxy1 = Main.exe 2"). Então a conexão é recusada.
+        if (InstanceIdentity::Refused())
+        {
+            Logger::Log("PACKETSNIFFER",
+                        "conexao BLOQUEADA (instancia errada): recusado pelo MuProxy2 no handshake — %s:%d",
+                        ip, port);
+            WSASetLastError(WSAECONNREFUSED);
+            return SOCKET_ERROR;
+        }
+
         Logger::Log("PACKETSNIFFER", "CONNECT to %s:%d", ip, port);
+        // Guarda o destino REAL: o hook de getpeername devolve esse par ao
+        // cliente (a validacao local dele nao pode ver o loopback).
+        GameServerConnection::RememberRealPeer(s, ip, port);
 
         // Rastreia socket do game server para injects
         if (GameServerConnection::IsGameServerPort(port))
@@ -311,8 +382,20 @@ static int WINAPI HookConnect(SOCKET s, const sockaddr* name, int namelen)
             Logger::Log("PACKETSNIFFER", "Game server socket rastreado: %d", (int)s);
         }
 
-        target.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
-        return TrueConnect(s, (sockaddr*)&target, sizeof(target));
+        // Isola a instância: o jogo sempre conecta no LOOPBACK desta instância
+        // (127.0.0.1 / 127.0.0.2 / ...), mas SEM mexer na porta: a porta do
+        // servidor (44411 do CS, a do GS no C116) é intocável. Cada instância
+        // do MuProxy2 escuta a MESMA porta no seu próprio loopback, então as
+        // instâncias não se cruzam.
+        const char* localIp = InstancePorts::LocalIp();
+        target.sin_addr.S_un.S_addr = inet_addr(localIp);
+        int r = TrueConnect(s, (sockaddr*)&target, sizeof(target));
+        // Log do RESULTADO do connect local: se ele falhar, o cliente fica
+        // esperando um greeting que nunca chega — e o hook de recv nao loga
+        // r <= 0, entao o erro some do log.
+        Logger::Log("PACKETSNIFFER", "connect local %s:%d ret=%d err=%d socket=%d",
+                    localIp, port, r, (r == SOCKET_ERROR) ? WSAGetLastError() : 0, (int)s);
+        return r;
     }
     return TrueConnect(s, name, namelen);
 }
@@ -327,6 +410,8 @@ static int WINAPI HookWSAConnect(SOCKET s, const sockaddr* name, int namelen,
         strncpy_s(ip, inet_ntoa(target.sin_addr), 15);
         int port = ntohs(target.sin_port);
         Logger::Log("PACKETSNIFFER", "WSACONNECT to %s:%d", ip, port);
+        // Guarda o destino REAL (ver HookGetPeerName).
+        GameServerConnection::RememberRealPeer(s, ip, port);
 
         // Rastreia socket do game server para injects
         if (GameServerConnection::IsGameServerPort(port))
@@ -335,7 +420,9 @@ static int WINAPI HookWSAConnect(SOCKET s, const sockaddr* name, int namelen,
             Logger::Log("PACKETSNIFFER", "Game server socket rastreado: %d", (int)s);
         }
 
-        target.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
+        // Isola a instância: o loopback é o desta instância; a porta do
+        // servidor fica intacta (ver HookConnect).
+        target.sin_addr.S_un.S_addr = inet_addr(InstancePorts::LocalIp());
         return TrueWSAConnect(s, (sockaddr*)&target, sizeof(target), callerData, calleeData, sqos, gqos);
     }
     return TrueWSAConnect(s, name, namelen, callerData, calleeData, sqos, gqos);
@@ -431,9 +518,10 @@ bool Install()
         { "recvfrom", (void*)HookRecvFrom, (void**)&TrueRecvFrom },
         { "connect", (void*)HookConnect, (void**)&TrueConnect },
         { "WSAConnect", (void*)HookWSAConnect, (void**)&TrueWSAConnect },
+        { "getpeername", (void*)HookGetPeerName, (void**)&TrueGetPeerName },
     };
 
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 9; ++i)
     {
         void* target = GetExportAddress(targets[i].name);
         if (!target)

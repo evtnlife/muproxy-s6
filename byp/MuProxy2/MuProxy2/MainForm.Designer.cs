@@ -52,6 +52,13 @@ namespace WinFormsMitm
             labelPotionInterval = new Label();
             txtPotionInterval = new TextBox();
             lblPotionState = new Label();
+            groupBoxAccount = new GroupBox();
+            lblAccount = new Label();
+            txtAccount = new TextBox();
+            lblPassword = new Label();
+            txtPassword = new TextBox();
+            btnAccountApply = new Button();
+            lblAccountInfo = new Label();
             statusStrip1 = new StatusStrip();
             toolTipPlayerCoord = new ToolStripStatusLabel();
             toolTipPlayerInfo = new ToolStripStatusLabel();
@@ -266,6 +273,7 @@ namespace WinFormsMitm
             // 
             tabPage1.Controls.Add(groupBox5);
             tabPage1.Controls.Add(groupBoxPotion);
+            tabPage1.Controls.Add(groupBoxAccount);
             tabPage1.Controls.Add(statusStrip1);
             tabPage1.Controls.Add(groupBox4);
             tabPage1.Location = new Point(4, 24);
@@ -477,6 +485,78 @@ namespace WinFormsMitm
             lblPotionState.Size = new Size(400, 46);
             lblPotionState.TabIndex = 14;
             lblPotionState.Text = "auto-potion: aguardando o byp.dll...";
+            //
+            // groupBoxAccount
+            //
+            groupBoxAccount.Controls.Add(lblAccountInfo);
+            groupBoxAccount.Controls.Add(btnAccountApply);
+            groupBoxAccount.Controls.Add(txtPassword);
+            groupBoxAccount.Controls.Add(lblPassword);
+            groupBoxAccount.Controls.Add(txtAccount);
+            groupBoxAccount.Controls.Add(lblAccount);
+            groupBoxAccount.Location = new Point(8, 472);
+            groupBoxAccount.Name = "groupBoxAccount";
+            groupBoxAccount.Size = new Size(425, 148);
+            groupBoxAccount.TabIndex = 7;
+            groupBoxAccount.TabStop = false;
+            groupBoxAccount.Text = "Conta do auto-login (por instância)";
+            //
+            // lblAccount
+            //
+            lblAccount.AutoSize = true;
+            lblAccount.Location = new Point(14, 27);
+            lblAccount.Name = "lblAccount";
+            lblAccount.Size = new Size(41, 15);
+            lblAccount.TabIndex = 0;
+            lblAccount.Text = "Conta:";
+            //
+            // txtAccount
+            //
+            txtAccount.Location = new Point(62, 24);
+            txtAccount.Margin = new Padding(2);
+            txtAccount.Name = "txtAccount";
+            txtAccount.Size = new Size(180, 23);
+            txtAccount.TabIndex = 1;
+            txtAccount.Text = "";
+            //
+            // lblPassword
+            //
+            lblPassword.AutoSize = true;
+            lblPassword.Location = new Point(14, 57);
+            lblPassword.Name = "lblPassword";
+            lblPassword.Size = new Size(41, 15);
+            lblPassword.TabIndex = 2;
+            lblPassword.Text = "Senha:";
+            //
+            // txtPassword
+            //
+            txtPassword.Location = new Point(62, 54);
+            txtPassword.Margin = new Padding(2);
+            txtPassword.Name = "txtPassword";
+            txtPassword.Size = new Size(180, 23);
+            txtPassword.TabIndex = 3;
+            txtPassword.Text = "";
+            txtPassword.UseSystemPasswordChar = true;
+            //
+            // btnAccountApply
+            //
+            btnAccountApply.Location = new Point(250, 54);
+            btnAccountApply.Margin = new Padding(2);
+            btnAccountApply.Name = "btnAccountApply";
+            btnAccountApply.Size = new Size(160, 25);
+            btnAccountApply.TabIndex = 4;
+            btnAccountApply.Text = "Salvar na sessão";
+            btnAccountApply.UseVisualStyleBackColor = true;
+            btnAccountApply.Click += btnAccountApply_Click;
+            //
+            // lblAccountInfo
+            //
+            lblAccountInfo.AutoSize = false;
+            lblAccountInfo.Location = new Point(14, 90);
+            lblAccountInfo.Name = "lblAccountInfo";
+            lblAccountInfo.Size = new Size(396, 46);
+            lblAccountInfo.TabIndex = 5;
+            lblAccountInfo.Text = "Cada instância tem o seu próprio Settings.ini (pasta da sessão). Duas contas diferentes = o servidor não derruba a segunda.";
             //
             // statusStrip1
             //
@@ -944,5 +1024,12 @@ namespace WinFormsMitm
         private Label labelPotionInterval;
         private TextBox txtPotionInterval;
         private Label lblPotionState;
+        private GroupBox groupBoxAccount;
+        private Label lblAccount;
+        private TextBox txtAccount;
+        private Label lblPassword;
+        private TextBox txtPassword;
+        private Button btnAccountApply;
+        private Label lblAccountInfo;
         }
 }

@@ -25,11 +25,12 @@ if not exist ..\dist mkdir ..\dist
 set SOURCES=
 set SOURCES=%SOURCES% src\core\dllmain.cpp src\core\Logger.cpp src\core\InlineHook.cpp src\core\OriginalApi.cpp src\core\StackTrace.cpp
 set SOURCES=%SOURCES% src\crypto\MuCipher.cpp src\crypto\SimpleModulusCipher.cpp src\crypto\C3Decoder.cpp
-set SOURCES=%SOURCES% src\net\CommandChannel.cpp src\net\PacketChannel.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\net\winsock\WinsockHooks.cpp
-set SOURCES=%SOURCES% src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\packets\GameServerConnection.cpp src\packets\PacketDiag.cpp
+set SOURCES=%SOURCES% src\net\CommandChannel.cpp src\net\PacketChannel.cpp src\net\PacketHandler.cpp src\net\MessageRegistry.cpp src\net\InstancePorts.cpp src\net\InstanceIdentity.cpp src\net\winsock\WinsockHooks.cpp
+set SOURCES=%SOURCES% src\packets\PacketSniffer.cpp src\packets\PacketReassembler.cpp src\packets\NameRewriter.cpp src\packets\PacketInjector.cpp src\packets\GameServerConnection.cpp src\packets\PacketDiag.cpp src\packets\HwidRewrite.cpp
 set SOURCES=%SOURCES% src\game\GameMemory\Globals.cpp src\game\GameMemory\Object.cpp src\game\GameMemory\Player.cpp src\game\GameMemory\ClientVitals.cpp src\game\MonsterTracker.cpp src\game\ViewportMap.cpp src\game\SkillMap.cpp src\game\SkillHook.cpp
 set SOURCES=%SOURCES% src\attack\AttackModule.cpp src\debug\DebugTools.cpp src\debug\DebugScans.cpp
 set SOURCES=%SOURCES% src\potion\AutoPotion.cpp
+set SOURCES=%SOURCES% src\client\ClientHooks.cpp src\client\ClientPatches.cpp
 
 cl.exe /nologo /O2 /LD /MD /W3 /EHsc /Isrc\include %SOURCES% /Fobuild\ /link /DEF:src\Main.def /OUT:..\dist\byp.dll /MACHINE:X86 /OPT:REF /OPT:ICF /MAP:..\dist\byp.map
 

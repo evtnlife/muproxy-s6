@@ -16,7 +16,8 @@ public class HeaderPatternAnalysisTests
     [Fact]
     public void Analyze_Raw_Headers_And_Possible_Ciphered_Equivalents()
     {
-        var logPath = @"F:\blackrockmu\logs_backup_2026-08-05\byp_packets.log";
+        var logPath = TestLogLocator.Find();
+        if (logPath == null) return;   // sem log de captura: nada a analisar
         var entries = PacketLogParser.Parse(logPath);
 
         // Conta headers no log original (antes de qualquer transform)
