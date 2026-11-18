@@ -1,30 +1,22 @@
 [
   {
-    "content": "C++ AttackModule.h: atualizar AttackConfig (monsters/playersAll/playersClick/others)",
+    "content": "Desindexar (git rm --cached) os arquivos do jogo: Data/, WebView2 do launcher, binários/configs na raiz",
     "status": "completed"
   },
   {
-    "content": "C++ AttackModule.cpp: map armazena type, session vars, WatcherThread filter, DispatcherThread, parse",
+    "content": "Desindexar as fontes de referência de terceiros (MuEmu-master, OpenMU-master)",
     "status": "completed"
   },
   {
-    "content": "C# Messages.cs: atualizar AttackStartMessage/AttackConfigMessage",
+    "content": "Reescrever o .gitignore para cobrir explicitamente o que não deve ser versionado",
     "status": "completed"
   },
   {
-    "content": "C# AttackService.cs: atualizar propriedades",
+    "content": "Criar README.md na raiz com instalação e build",
     "status": "completed"
   },
   {
-    "content": "C# MainForm.Designer.cs: substituir 2 checkboxes pelos novos (Monstro/Player+sub-opções/Outros)",
-    "status": "completed"
-  },
-  {
-    "content": "C# MainForm.cs: ligar novos controles",
-    "status": "completed"
-  },
-  {
-    "content": "Rebuild byp.dll + verificar",
+    "content": "Verificar: git status / git ls-files / integridade do working tree",
     "status": "completed"
   }
 ]

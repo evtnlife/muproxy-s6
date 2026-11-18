@@ -16,7 +16,8 @@ Bypass **client-side** do cliente MU Online do servidor privado BlackRockMU
 
 ## 1. O que o repositório contém (e o que ele NÃO contém)
 
-O git versiona **apenas o código-fonte do projeto**:
+O git versiona o **código-fonte** do projeto **e os artefatos de build da
+raiz** (que são os mesmos arquivos que o jogo usa):
 
 ```
 byp/            fonte do bypass (C++) e do MuProxy2 (C#)
@@ -24,20 +25,29 @@ openspec/       especificações de mudança (proposal/design/tasks)
 Scripts/        .reg de resolução de tela/idioma do cliente
 .agents/        skills de openspec
 package.json    tooling de node (openspec)
+
+byp.dll                ← deployável (build), versionado
+opengl32.dll           ← deployável (build), versionado
+MuProxy2.exe           ← deployável (build), versionado
+MuProxy2.dll           ← deployável (build), versionado
+MuProxy2.deps.json     ← deployável (build), versionado
+MuProxy2.runtimeconfig.json ← deployável (build), versionado
+wzAudio.dll            ← módulo do PS (§1.1), versionado
 ```
 
-**Fora do git** (baixados/gerados por fora, ver `.gitignore`):
+**Fora do git** (só no disco, ver `.gitignore`):
 
 ```
 Data/                       assets do cliente (~1,1 GB)
 BlackrockMU.exe.WebView2/   runtime WebView2 do launcher
-main.exe, *.dll,            binários do cliente (inclui o wzAudio.dll do PS — §1.1)
+main.exe, Main.dll, Up.dll, Camera.dll, Configs.dll, msvcr100.dll, …
+                             binários do cliente
 config.EMU, Settings.ini, main.premium
 MuEmu-master/, OpenMU-master/   fontes de referência de terceiros
 ```
 
-> Os arquivos continuam **no disco**; eles só foram removidos do índice do
-> git. Se precisar versionar algo de lá de novo:
+> Os arquivos do cliente continuam **no disco**; eles só foram removidos do
+> índice do git. Se precisar versionar algo de lá de novo:
 > `git add -f <caminho>`.
 
 ### Baixar o cliente do jogo
@@ -48,12 +58,41 @@ jogo precisa ser:
 
 ```
 F:\blackrockmu\
-├── main.exe            ← do cliente do jogo
-├── Data\               ← do cliente do jogo
-├── wzAudio.dll         ← do cliente do jogo (OBRIGATÓRIO — ver §1.1)
-├── byp.dll             ← buildado por você
-├── opengl32.dll        ← buildado por você
-└── MuProxy2.exe        ← buildado por você
+├── main.exe            ← do cliente do jogo (fora do git)
+├── Data\               ← do cliente do jogo (fora do git)
+├── wzAudio.dll         ← do cliente do jogo (OBRIGATÓRIO — §1.1) — NO GIT
+├── byp.dll             ← buildado por você (§3.1) — NO GIT
+├── opengl32.dll        ← buildado por você (§3.2) — NO GIT
+├── MuProxy2.exe        ← buildado por você (§3.3) — NO GIT
+├── MuProxy2.dll        ← buildado por você (monta com o .exe) — NO GIT
+├── MuProxy2.deps.json  ← buildado por você — NO GIT
+└── MuProxy2.runtimeconfig.json ← buildado por você — NO GIT
+```
+
+### 1.2 O que fica na pasta do jogo (e o que vai pro git)
+
+A raiz do repositório **é** a pasta do jogo. Os deployáveis ficam nela **e**
+versionados, para o repo já entregar o jogo pronto para rodar.
+
+| Arquivo | Origem | Obrigatório? | Vai pro git? |
+|---------|--------|---------------|--------------|
+| `main.exe`, `Data\`, `Settings.ini`, `main.premium`, `config.EMU` | cliente do jogo | ✅ | ❌ |
+| `wzAudio.dll` | cliente do jogo (é onde mora o PS — §1.1) | ✅ | ✅ |
+| `byp.dll` | **buildado** por você (`build.bat`) | ✅ | ✅ |
+| `opengl32.dll` | **buildado** por você (`opengl\build.bat`) | ✅ | ✅ |
+| `MuProxy2.exe` + `MuProxy2.dll` + `MuProxy2.deps.json` + `MuProxy2.runtimeconfig.json` | **buildado** por você (`dotnet build`) | ✅ | ✅ |
+
+> **Todos precisam estar no disco.** O `main.exe` não abre sem o
+> `wzAudio.dll`, não carrega o bypass sem o `opengl32.dll`/`byp.dll`, e o
+> `MuProxy2.exe` não sobe sem o `.dll` + `.deps.json` +
+> `.runtimeconfig.json` ao lado dele.
+>
+> Depois de um build novo, versiona os deployáveis da raiz:
+> `git add byp.dll opengl32.dll MuProxy2.exe MuProxy2.dll MuProxy2.deps.json MuProxy2.runtimeconfig.json`
+
+```powershell
+# copiar o MuProxy2 inteiro (exe + dll + json), não só o .exe
+Copy-Item byp\MuProxy2\MuProxy2\bin\Release\net8.0-windows\* F:\blackrockmu\ -Exclude *.pdb -Force
 ```
 
 ### 1.1 `wzAudio.dll` — onde mora o PS (não apague!)
@@ -85,8 +124,8 @@ o cliente abrir e tocar áudio sem o protector atrapalhando.
 > `git show e0945a2^:byp/gg_bypass2/src/PsBypass.cpp`.
 
 **Consequência prática:** o `wzAudio.dll` **precisa continuar na pasta do
-jogo** (sem ele o `main.exe` nem abre) e **não precisa estar no git** — é
-arquivo do cliente, não do projeto.
+jogo** (sem ele o `main.exe` nem abre) e **é versionado** — é o arquivo que
+faz o bypass do PS, então vale a pena não perder essa peça.
 
 ---
 
@@ -97,6 +136,7 @@ arquivo do cliente, não do projeto.
 | Windows | 10/11 x64 (o jogo é **x86**) |
 | Visual Studio | 2022 ou 18 — workload **"Desenvolvimento para desktop em C++"**. Os `.bat` chamam `vcvars32.bat` (toolchain x86) automaticamente. |
 | .NET SDK | **8.0** (`dotnet --list-sdks` deve mostrar um 8.x) |
+| .NET Desktop Runtime | **8.0** (`Microsoft.WindowsDesktop.App 8.0.x`) — necessário para **rodar** o `MuProxy2.exe` buildado |
 | Cliente do jogo | `main.exe` + `Data/` do BlackRockMU |
 
 ---
@@ -135,12 +175,20 @@ dotnet build MuProxy2.csproj -c Release
 ### 3.4 Deploy completo
 
 ```powershell
-cd byp\gg_bypass2
-.\deploy.bat         # builda byp.dll + opengl32.dll e copia para F:\blackrockmu\
+cd byp\gg_bypass2\opengl
+.\build.bat          # 1º: gera opengl32.dll (o deploy.bat espera ele em ..\dist\)
+cd ..\
+.\deploy.bat         # 2º: builda byp.dll + opengl32.dll e copia para F:\blackrockmu\
 ```
 
 > O `deploy.bat` só copia `byp.dll` e `opengl32.dll`. O `MuProxy2.exe` você
-> copia manualmente para a pasta do jogo.
+> copia manualmente (passo 4 da instalação).
+>
+> **Ordem importa na primeira vez:** o `build.bat` (que roda dentro do
+> `deploy.bat`) já tenta copiar `..\dist\opengl32.dll` para a pasta do jogo —
+> se o proxy GL ainda não foi buildado, esse `copy` falha com
+> *"The system cannot find the file specified"* (o deploy continua e deixa a
+> `opengl32.dll` antiga no lugar). Rode o `opengl\build.bat` antes.
 
 ### 3.5 Testes
 
@@ -155,12 +203,20 @@ dotnet test -c Release
 
 1. **Instale o cliente** — extraia `main.exe`, `Data/` e o launcher em
    `F:\blackrockmu\`.
-2. **Build** — rode os passos da seção 3 (ou `.\deploy.bat`).
-3. **Copie o MuProxy2** — `byp\MuProxy2\MuProxy2\bin\Release\net8.0-windows\*`
-   → `F:\blackrockmu\`.
-4. **Confira** — a pasta do jogo deve conter `byp.dll`, `opengl32.dll` e
-   `MuProxy2.exe` ao lado do `main.exe`.
-5. **Verifique os imports** (confirma que o jogo carrega o nosso `opengl32.dll`):
+2. **Build das DLLs** — `opengl\build.bat` e depois `deploy.bat` (§3.4).
+3. **Build do MuProxy2** — `dotnet build MuProxy2.csproj -c Release` (§3.3).
+4. **Copie o MuProxy2 inteiro** para a pasta do jogo — são **4 arquivos**
+   (`MuProxy2.exe`, `MuProxy2.dll`, `MuProxy2.deps.json`,
+   `MuProxy2.runtimeconfig.json`); copiar só o `.exe` não abre:
+
+```powershell
+Copy-Item byp\MuProxy2\MuProxy2\bin\Release\net8.0-windows\* F:\blackrockmu\ -Exclude *.pdb -Force
+```
+
+5. **Confira** — a pasta do jogo deve conter, ao lado do `main.exe`:
+   `wzAudio.dll`, `byp.dll`, `opengl32.dll`, `MuProxy2.exe` (+ os 3 json/dll
+   do MuProxy2). Tabela completa em §1.2.
+6. **Verifique os imports** (confirma que o jogo carrega o nosso `opengl32.dll`):
 
 ```powershell
 cd byp\gg_bypass2
@@ -223,7 +279,8 @@ envia `HELLO|pid=..|base=..` e a UI recusa um `byp` de outra instância.
 | Porta já em uso | Outra instância/base ocupa a porta. | Feche a outra instância; a base é escolhida testando o bind real das portas. |
 | O jogo conecta direto no servidor, sem passar pelo proxy | `START PROXY` não foi clicado, ou o `main.exe` tem o host do servidor fixo. | Clique em **START PROXY** antes de logar. |
 | Log do bypass | `Config::LOG_TO_FILE` ligado → `gg_bypass2.log` na pasta do jogo (ou na pasta da sessão, se `MUPROXY_SESSION` existir). | Ver `byp\gg_bypass2\src\include\Config.h`. |
-| O cliente não abre / erro de DLL faltando | O `main.exe` importa `wzAudio.dll` da pasta (§1.1) — ele é obrigatório e também é onde está o bypass do PS. | Garanta que `wzAudio.dll` continua ao lado do `main.exe` (não versionado, mas **obrigatório** em disco). |
+| O cliente não abre / erro de DLL faltando | O `main.exe` importa `wzAudio.dll` da pasta (§1.1) — ele é obrigatório e também é onde está o bypass do PS. | Garanta que `wzAudio.dll` continua ao lado do `main.exe` (está versionado no git, mas é obrigatório em disco). |
+| `MuProxy2.exe` não abre / "não pôde ser encontrado" | Faltou copiar o output inteiro do build (`.exe` sozinho não basta: precisa do `.dll`, `.deps.json` e `.runtimeconfig.json`). | Copie os 4 arquivos (§4, passo 4) e confirme que o **.NET 8 Desktop Runtime** está instalado (`dotnet --list-runtimes`). |
 
 ---
 

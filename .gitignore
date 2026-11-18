@@ -1,11 +1,13 @@
 # =============================================================
-# BlackRockMU — somente o CÓDIGO do projeto é versionado.
+# BlackRockMU — o que é versionado:
 #
-# NÃO versionar:
-#   - binários e assets do cliente do jogo (Data/, *.dll, *.exe, ...)
+#   - código-fonte do projeto (byp/, openspec/, Scripts/, …)
+#   - os arquivos da RAIZ do repo, que também são a pasta do jogo:
+#     byp.dll, opengl32.dll, MuProxy2.* e wzAudio.dll (§ "Deployáveis")
+#
+# O que NÃO é versionado (fica só no disco):
+#   - assets e binários do CLIENTE do jogo (Data/, main.exe, Main.dll, …)
 #   - fontes de referência de terceiros (MuEmu-master, OpenMU-master)
-#
-# Esses arquivos continuam no disco; eles só saem do índice do git.
 # =============================================================
 
 # --- Build / artefatos de compilação -----------------------------------
@@ -40,6 +42,18 @@ MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/MuProxy2.Hook.lastbuildst
 config.EMU
 Settings.ini
 main.premium
+
+# --- Arquivos da raiz que ficam versionados ------------------------------
+# A raiz do repo É a pasta do jogo (F:\blackrockmu). Estes arquivos são
+# gerados pelo build (ou são o módulo do PS) e precisam ficar versionados
+# para o repo já entregar o jogo pronto para rodar.
+!byp.dll
+!opengl32.dll
+!MuProxy2.exe
+!MuProxy2.dll
+!MuProxy2.deps.json
+!MuProxy2.runtimeconfig.json
+!wzAudio.dll
 
 # --- Assets do jogo ------------------------------------------------------
 /Data/
