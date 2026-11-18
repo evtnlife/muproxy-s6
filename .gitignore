@@ -1,20 +1,28 @@
-# Track ONLY the project skill; ignore everything else at the root
-# (game binaries, reference sources, and the nested gg_bypass2/MuProxy2 repos).
+# =============================================================
+# BlackRockMU — somente o CÓDIGO do projeto é versionado.
+#
+# NÃO versionar:
+#   - binários e assets do cliente do jogo (Data/, *.dll, *.exe, ...)
+#   - fontes de referência de terceiros (MuEmu-master, OpenMU-master)
+#
+# Esses arquivos continuam no disco; eles só saem do índice do git.
+# =============================================================
+
+# --- Build / artefatos de compilação -----------------------------------
 *.sdf
 *.obj
 *.exp
 *.lib
+*.pdb
+*.map
+*.log
 dist/
 build/
 .vs/*
-*.log
-*.dll
-*.exe
-*.pdb
 */obj/*
-*/bin/*
-*/Debug/*
-*/Release/*
+*/bin/
+*/Debug/
+*/Release/
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.dll.recipe
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/CL.command.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/Cl.items.tlog
@@ -25,7 +33,25 @@ MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.read.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.secondary.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/link.write.1.tlog
 MuProxy2.Hook/MuProxy2.Hook/Release/MuProxy2.Hook.tlog/MuProxy2.Hook.lastbuildstate
+
+# --- Binários do cliente do jogo ----------------------------------------
+*.dll
+*.exe
+config.EMU
+Settings.ini
+main.premium
+
+# --- Assets do jogo ------------------------------------------------------
+/Data/
+
+# --- Assets do launcher (WebView2) ---------------------------------------
+/BlackrockMU.exe.WebView2/
+
+# --- Fontes de referência de terceiros (somente leitura) ----------------
+/MuEmu-master/
+/OpenMU-master/
+
+# --- Ambiente local ------------------------------------------------------
 .novamind/
-node_modules/*
-sessions/*
-BlackrockMU.exe.WebView2/*
+node_modules/
+sessions/
