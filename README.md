@@ -1,5 +1,24 @@
 # BlackRockMU — `byp.dll` + `MuProxy2`
 
+> ## ⚠️ Aviso — estudo de engenharia reversa, use com cuidado
+>
+> Este projeto é uma **pesquisa/estudo de engenharia reversa e de segurança**
+> sobre o protocolo de rede de um cliente de jogo (MU Online) e o módulo de
+> proteção que ele carrega. O objetivo é **educacional**: entender hooking de
+> API, empacotamento/crypto de pacotes, injeção via proxy e análise de
+> memória de processo.
+>
+> - Use **apenas** em ambiente de **servidor privado** ou em software
+>   **próprio**/com autorização explícita por escrito.
+> - Respeite os Termos de Uso do jogo e do servidor: burlar proteção ou
+>   advantage play pode banir a conta.
+> - **Não** use contra sistemas de terceiros, para fraude, DDoS ou para
+>   contornar controles de acesso que você não tem autorização de testar.
+> - O autor não se responsabiliza por danos causados pelo uso indevido.
+>
+> Ferramentas não destrutivas para testar: `dumpbin /IMPORTS`, `x32dbg`,
+> WireShark/Wireshark em loopback.
+
 Bypass **client-side** do cliente MU Online do servidor privado BlackRockMU
 (`145.239.149.84`), dividido em três peças:
 

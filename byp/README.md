@@ -1,5 +1,16 @@
 # byp
 
+> ## ⚠️ Aviso — estudo de engenharia reversa, use com cuidado
+>
+> Projeto **educacional** de pesquisa em engenharia reversa e segurança:
+> hooking de API, crypto/empacotamento de pacotes e análise de memória de
+> processo em cliente de jogo. Use **somente** em servidor privado ou em
+> software próprio/com autorização explícita por escrito, respeitando os
+> Termos de Uso do jogo e do servidor. **Não** use contra sistemas de
+> terceiros, para fraude ou para contornar controles de acesso sem
+> autorização. O autor não se responsabiliza por danos causados por uso
+> indevido.
+
 Código-fonte e análise do bypass do cliente MU BlackRock (`byp.dll`, C++) e da
 interface de controle `MuProxy2` (C#).
 
