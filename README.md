@@ -8,12 +8,6 @@
 > API, empacotamento/crypto de pacotes, injeção via proxy e análise de
 > memória de processo.
 >
-> - Use **apenas** em ambiente de **servidor privado** ou em software
->   **próprio**/com autorização explícita por escrito.
-> - Respeite os Termos de Uso do jogo e do servidor: burlar proteção ou
->   advantage play pode banir a conta.
-> - **Não** use contra sistemas de terceiros, para fraude, DDoS ou para
->   contornar controles de acesso que você não tem autorização de testar.
 > - O autor não se responsabiliza por danos causados pelo uso indevido.
 >
 > Ferramentas não destrutivas para testar: `dumpbin /IMPORTS`, `x32dbg`,
