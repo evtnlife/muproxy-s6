@@ -69,3 +69,4 @@ main.premium
 .novamind/
 node_modules/
 sessions/
+logs/
